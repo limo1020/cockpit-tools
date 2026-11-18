@@ -17,6 +17,8 @@ mod openai_usage;
 mod quota_windows;
 #[path = "codex_custom_provider_usage.rs"]
 mod custom_provider_usage;
+#[path = "codex_new_api_balance.rs"]
+pub(crate) mod new_api_balance;
 pub(crate) use custom_provider_usage::CustomProviderUsage;
 
 #[tauri::command]
@@ -47,9 +49,11 @@ pub async fn save_codex_account_groups(data: String, expected_revision: Option<u
 #[tauri::command]
 pub async fn load_codex_model_providers() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let path = account::get_data_dir()?.join(CODEX_MODEL_PROVIDERS_FILE);
+        let dir = account::get_data_dir()?;
+        let path = dir.join(CODEX_MODEL_PROVIDERS_FILE);
         if !path.exists() { return Ok("[]".to_string()); }
-        std::fs::read_to_string(&path).map_err(|error| format!("Failed to read codex model providers: {error}"))
+        let data = std::fs::read_to_string(&path).map_err(|error| format!("Failed to read codex model providers: {error}"))?;
+        new_api_balance::transform_provider_configs(&dir, data, false)
     }).await.map_err(|error| error.to_string())?
 }
 
@@ -58,8 +62,34 @@ pub async fn save_codex_model_providers(data: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let dir = account::get_data_dir()?;
         std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        let data = new_api_balance::transform_provider_configs(&dir, data, true)?;
         crate::modules::atomic_write::write_secret_string_atomic(&dir.join(CODEX_MODEL_PROVIDERS_FILE), &data)
     }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn codex_query_new_api_account_balance(provider_id: String) -> Result<new_api_balance::NewApiAccountBalance, String> {
+    if crate::modules::codex_quota::relay_balance_disabled() {
+        return Err(crate::modules::codex_quota::RELAY_BALANCE_DISABLED.into());
+    }
+    let data = load_codex_model_providers().await?;
+    new_api_balance::query(&data, &provider_id).await
+}
+
+pub(crate) fn codex_account_balance_binding(account: &CodexAccount) -> Option<(String, String)> {
+    use sha2::Digest;
+    let path = account::get_data_dir().ok()?.join(CODEX_MODEL_PROVIDERS_FILE);
+    let data = std::fs::read_to_string(path).ok()?;
+    let providers: Vec<Value> = serde_json::from_str(&data).ok()?;
+    let provider = new_api_balance::find_account_provider(
+        &providers,
+        account.api_base_url.as_deref()?,
+        account.openai_api_key.as_deref(),
+        account.api_provider_id.as_deref(),
+    )?;
+    let id = provider.get("id")?.as_str()?.to_owned();
+    let revision = format!("{:x}", sha2::Sha256::digest(serde_json::to_vec(provider).ok()?));
+    Some((id, revision))
 }
 
 fn codex_model_provider_usage_url(base_url: &str) -> Result<String, String> {

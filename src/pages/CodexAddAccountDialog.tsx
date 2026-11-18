@@ -2,7 +2,7 @@ import { OpenAIUsageKeyField } from "../components/codex/OpenAIUsageSettingsDial
 import { isOpenAIOfficialUsageUrl, OPENAI_OFFICIAL_USAGE_BASE_URL } from "../utils/openaiOfficialUsage";
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, Download, X, Globe, KeyRound, Database, Copy, Check, RotateCw, CircleAlert, Info, Star, Eye, EyeOff, FileUp, FileText, ExternalLink, FolderPlus, Monitor, Terminal, ShieldCheck, Search } from "lucide-react";
+import { RefreshCw, Download, X, Globe, KeyRound, Database, Copy, Check, RotateCw, CircleAlert, Info, Star, Eye, EyeOff, FileUp, FileText, ExternalLink, FolderPlus, Monitor, Terminal, ShieldCheck, Search, Plus } from "lucide-react";
 import { ModalErrorMessage } from "../components/ModalErrorMessage";
 import { scrollElementIntoView } from "../utils/reducedMotion";
 import { MfaQuickCodeSelect } from "../components/MfaQuickCodeSelect";
@@ -14,7 +14,7 @@ import { CODEX_TEMP_LOGIN_STEPS } from "../services/codexTempLoginService";
 import { CODEX_API_PROVIDER_CUSTOM_ID, CODEX_API_PROVIDER_PRESETS, COCKPIT_API_PROVIDER_ID, resolveOllamaLocalPlaceholderKey } from "../utils/codexProviderPresets";
 import { canUseCodexOAuthAccountProxy } from "../utils/codexAccountProxy";
 import type { CodexAccountsViewProps } from "./CodexAccountsView";
-import { filterCodexSavedProviders } from "./codexAccountsControllerModel";
+import { CODEX_NEW_MANAGED_PROVIDER, filterCodexSavedProviders } from "./codexAccountsControllerModel";
 
 /** 渲染 CodexAccountsOverviewPanel 的 expr:showAddModal && 业务面板。 */
 export function CodexAddAccountDialog(props: CodexAccountsViewProps) {
@@ -905,12 +905,15 @@ export function CodexAddAccountDialog(props: CodexAccountsViewProps) {
                     {addTab === "apikey" && (
                       <div className="add-section">
                         <div className="oauth-link">
-                          <label>
-                            {t(
-                              "codex.modelProviders.selectSavedProvider",
-                              "已保存供应商",
-                            )}
-                          </label>
+                          <div className="codex-saved-provider-heading">
+                            <span>{t("codex.modelProviders.selectSavedProvider", "已保存供应商")}</span>
+                            <button type="button" className="codex-saved-provider-create"
+                              aria-pressed={managedProviderId === CODEX_NEW_MANAGED_PROVIDER}
+                              onClick={() => handleSelectManagedProvider(CODEX_NEW_MANAGED_PROVIDER)}>
+                              <Plus size={14} aria-hidden="true" />
+                              {t("codex.modelProviders.addIndependent", "New provider")}
+                            </button>
+                          </div>
                           {managedProvidersLoading ? (
                             <div className="section-desc">
                               {t("common.loading", "加载中...")}

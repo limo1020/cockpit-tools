@@ -22,6 +22,7 @@ async fn parallel_same_provider_key_imports_and_pool_appends_keep_every_account(
                     Some(CodexApiProviderMode::Custom), Some("relay".into()), Some("Relay".into()),
                     vec!["model-a".into()], Some(false), Some("responses".into()), false, false,
                     HashMap::new(), None, Some(format!("Relay {index}")), None, None,
+                    false,
                 ).unwrap()
             })
         }).collect::<Vec<_>>();
@@ -121,6 +122,7 @@ fn full_key_edit_migrates_persisted_references_and_failed_edits_remain_retryable
         None,
         None,
         None,
+        false,
     )
     .unwrap();
     let mut store = crate::models::InstanceStore::new();

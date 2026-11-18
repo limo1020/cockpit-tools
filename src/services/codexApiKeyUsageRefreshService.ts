@@ -7,12 +7,11 @@ import {
   isMoonshotBalanceUrl,
 } from '../utils/codexDeepSeekAccess';
 import {
-  findCodexModelProviderByBaseUrl,
-  findCodexModelProviderById,
   listCodexModelProviders,
   queryCodexModelProviderUsage,
   type CodexModelProviderUsageSummary,
 } from './codexModelProviderService';
+import { findManagedCodexProviderForAccount } from '../utils/codexModelProviderAccountSync';
 import { isModelProviderUsageUnavailableError, isRelayBalanceDisabledError } from './modelProviderUsageService';
 import { customProviderUsageBinding, customProviderUsageForRequest } from '../utils/codexCustomProviderUsage';
 
@@ -105,9 +104,7 @@ export async function refreshCodexApiKeyUsageForAccounts(
   const updates: Record<string, CodexApiKeyUsageState> = {};
 
   for (const account of candidates) {
-    const provider =
-      findCodexModelProviderById(providers, account.api_provider_id) ??
-      findCodexModelProviderByBaseUrl(providers, resolveAccountUsageBaseUrl(account));
+    const provider = findManagedCodexProviderForAccount(providers, account);
     const cachedSummary = initialCache[account.id]?.summary;
     if (!isCodexApiKeyUsageQueryEligible(account, provider?.customUsage ? 'custom' : provider?.integrationType, cachedSummary) && !cachedSummary?.cockpit) continue;
     const baseUrl = resolveAccountUsageBaseUrl(account, provider?.baseUrl);
@@ -153,8 +150,7 @@ export async function refreshCodexApiKeyUsageForAccounts(
   for (const [accountId, update] of Object.entries(updates)) {
     const account = accounts.find(item => item.id === accountId);
     if (update.sourceBinding && account) {
-      const provider = findCodexModelProviderById(latestProviders, account.api_provider_id) ??
-        findCodexModelProviderByBaseUrl(latestProviders, resolveAccountUsageBaseUrl(account));
+      const provider = findManagedCodexProviderForAccount(latestProviders, account);
       const activeBinding = resolveOpenAIUsageConfig(provider, account.openai_api_key ?? '')?.binding ??
         customProviderUsageBinding(provider);
       if (activeBinding !== update.sourceBinding) continue;

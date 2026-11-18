@@ -97,6 +97,9 @@ fn parse_codex_model_provider_vision_entries(content: &str) -> Vec<CodexModelPro
     items
         .iter()
         .filter_map(|item| {
+            if item.get("deletedAt").and_then(Value::as_u64).unwrap_or_default() > 0 {
+                return None;
+            }
             let id = item
                 .get("id")
                 .and_then(Value::as_str)
@@ -150,31 +153,33 @@ fn codex_model_provider_vision_record_for_account<'a>(
         .api_base_url
         .as_deref()
         .and_then(normalize_provider_vision_base_url);
-    entries
-        .iter()
-        .find(|entry| {
-            let id_matches = provider_id.is_some_and(|value| value == entry.id);
-            let base_url_matches = account_base_url
-                .as_deref()
-                .zip(entry.base_url.as_deref())
-                .is_some_and(|(account_url, provider_url)| account_url == provider_url);
-            id_matches || base_url_matches
+    let account_base_url = account_base_url.as_deref();
+    let api_key = account.openai_api_key.as_deref().map(str::trim);
+    let matching_endpoint = || {
+        entries.iter().filter(move |entry| {
+            account_base_url.is_some() && account_base_url == entry.base_url.as_deref()
         })
-        .map(|entry| {
-            account
-                .openai_api_key
-                .as_deref()
-                .map(str::trim)
-                .filter(|key| !key.is_empty())
-                .and_then(|api_key| {
-                    entry
-                        .credential_records
-                        .iter()
-                        .find(|(key, _)| key == api_key)
-                })
-                .map(|(_, record)| record)
-                .unwrap_or(&entry.record)
+    };
+    let entry = provider_id
+        .and_then(|id| entries.iter().find(|entry| entry.id == id))
+        .or_else(|| {
+            let key = api_key?;
+            let mut owners = matching_endpoint()
+                .filter(|entry| entry.credential_records.iter().any(|(value, _)| value == key));
+            let owner = owners.next()?;
+            owners.next().is_none().then_some(owner)
         })
+        .or_else(|| {
+            let mut matches = matching_endpoint();
+            let entry = matches.next()?;
+            matches.next().is_none().then_some(entry)
+        })?;
+    Some(
+        api_key
+            .and_then(|key| entry.credential_records.iter().find(|(value, _)| value == key))
+            .map(|(_, record)| record)
+            .unwrap_or(&entry.record),
+    )
 }
 
 /// 用供应商记录的识图能力补齐逐模型表。

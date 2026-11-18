@@ -102,6 +102,14 @@
       "custom": "Custom"
     },
     "benchmark": "Test case",
+    "savedPrompts": {
+      "name": "Question name",
+      "save": "Save question",
+      "remove": "Remove saved question",
+      "failed": "Could not save questions locally.",
+      "reorder": "Drag to reorder. With a question focused, use Alt + ↑ or Alt + ↓.",
+      "orderFailed": "Could not save the question order."
+    },
     "results": "Test results",
     "usageTokens": "{{tokens}} tok",
     "quotaUsed": "5h used {{percent}}%",
@@ -1588,8 +1596,8 @@
       "codexPathReset": "Reset to default",
       "codexSyncWsl": "Sync Codex to WSL",
       "codexSyncWslDesc": "After switching the default Codex account, also write auth.json and config.toml to the WSL Codex directory.",
-      "codexAppUiInjection": "Show API Service quota",
-      "codexAppUiInjectionDesc": "Codex instances bound to API Service show the selected model’s quota (GPT 5-hour/weekly quotas, DeepSeek balance or Grok quota), current-chat output speed and cache hit rate in the composer toolbar. The dialog includes quotas, chat metrics and API Service statistics. Switch request records between the current chat and the entire service, load more or refresh. Metrics show — when chat linkage or valid timing is unavailable. Keep Cockpit Tools running in the background; quota updates require a network connection.",
+      "codexAppUiInjection": "Show API Service quota and account balance",
+      "codexAppUiInjectionDesc": "Codex instances bound to API Service show the selected model’s quota (GPT 5-hour/weekly quotas, DeepSeek balance or Grok quota), current-chat output speed and cache hit rate in the composer toolbar. Provider accounts show their official DeepSeek balance or the relay account balance configured in provider settings. Click for details or refresh. API Service details include chat metrics and request records for the current chat or the entire service. Metrics show — when chat linkage or valid timing is unavailable. Keep Cockpit Tools running in the background; quota updates require a network connection.",
       "codexAppUiInjectionPoolLabel": "Accounts",
       "codexAppUiInjectionWeeklyLabel": "Week",
       "codexAppUiInjectionFiveHourLabel": "5h",
@@ -3183,6 +3191,22 @@
       }
     },
     "newApi": {
+      "balance": {
+        "settings": "Relay account balance (New API)",
+        "hint": "Enter the relay website above. Find your user ID and create a system access token in the website's personal settings.",
+        "userId": "User ID",
+        "accessToken": "System access token",
+        "invalidWebsite": "Enter the HTTPS address of the relay website.",
+        "invalidUserId": "Enter the complete user ID from the relay website. Letters and numbers are supported.",
+        "invalidAccessToken": "Paste the system access token from the website’s security settings.",
+        "authFailed": "Check the user ID and system access token in the provider settings.",
+        "failed": "Could not retrieve the balance. Try refreshing.",
+        "refresh": "Refresh relay account balance",
+        "notConfigured": "Not configured",
+        "unavailable": "Unavailable",
+        "rawQuota": "{{amount}} quota units",
+        "keyQuota": "API Key quota"
+      },
       "quota": {
         "available": "Quota",
         "unlimited": "Unlimited",
@@ -4210,7 +4234,8 @@
         "supportsWebsockets": "WebSocket Transport"
       },
       "validation": {
-        "apiKeyExists": "This API key already exists for this provider",
+        "apiKeyExists": "This API Key is already saved for this Base URL. Use a different key.",
+        "apiKeyUsedElsewhere": "This API Key already belongs to an account at a different Base URL.",
         "apiKeyRequired": "Enter an API key",
         "nameRequired": "Provider name is required.",
         "baseUrlInvalid": "Invalid Base URL.",
@@ -4221,6 +4246,7 @@
         "apiKeyUrlInvalid": "Use an HTTP(S) management-page URL without embedded credentials; enter API keys in the key field."
       },
       "saveSuccess": "Model provider saved.",
+      "savedWithAccount": "Provider and API Key account saved. The account is available in Overview.",
       "confirmDeleteWithAccounts": "Delete provider “{{name}}” and its {{count}} linked accounts?",
       "confirmDelete": "Delete provider \"{{name}}\"?",
       "deleteFailed": "Failed to delete provider: {{error}}",
@@ -4252,6 +4278,7 @@
       "searchSavedProviders": "Search providers",
       "noMatchingSavedProviders": "No matching providers",
       "selectSavedProvider": "Saved Providers",
+      "addIndependent": "New provider",
       "selectSavedApiKey": "Saved API Keys",
       "selectSavedApiKeyPlaceholder": "Select API key",
       "selectSavedApiKeyHint": "This provider has multiple API keys. Choose one here.",

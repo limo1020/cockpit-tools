@@ -45,10 +45,10 @@ import { resolveCodexModelProviderAccountName } from "../utils/codexModelProvide
 import { CODEX_API_PROVIDER_CUSTOM_ID, findCodexApiProviderPresetById, resolveCodexApiProviderPresetId, resolveOllamaLocalPlaceholderKey } from "../utils/codexProviderPresets";
 import { APIKEY_FUN_PROVIDER_BASE_URL } from "../utils/apikeyFunLinks";
 import { APIKEY_FUN_PREFILL_EVENT, consumeApiKeyFunPrefill, type ApiKeyFunPrefillPayload } from "../utils/apiKeyFunPrefill";
-import { OPENAI_USAGE_CONFIG_CHANGED_EVENT, findCodexModelProviderById, findCodexModelProviderByBaseUrl, queryCodexModelProviderUsage, saveCodexModelProviderDetectedIntegrationType, type CodexModelProvider, mergeCodexModelProviderApiKeysFromAccounts, upsertCodexModelProviderFromCredential } from "../services/codexModelProviderService";
+import { OPENAI_USAGE_CONFIG_CHANGED_EVENT, queryCodexModelProviderUsage, saveCodexModelProviderDetectedIntegrationType, type CodexModelProvider, mergeCodexModelProviderApiKeysFromAccounts, upsertCodexModelProviderFromCredential } from "../services/codexModelProviderService";
 import { customProviderUsageBinding, customProviderUsageForRequest } from "../utils/codexCustomProviderUsage";
 import { resolveCodexModelProviderForApiKey } from "../utils/codexModelProviderKeyConfig";
-import { buildCodexModelProviderAccountSnapshot, mergeCodexModelProviderCredentialInput } from "../utils/codexModelProviderAccountSync";
+import { buildCodexModelProviderAccountSnapshot, findManagedCodexProviderForAccount, mergeCodexModelProviderCredentialInput } from "../utils/codexModelProviderAccountSync";
 import { CODEX_API_KEY_USAGE_REFRESHED_EVENT, readCodexApiKeyUsageCache, writeCodexApiKeyUsageCache, type CodexApiKeyUsageState } from "../services/codexApiKeyUsageRefreshService";
 import { isModelProviderUsageUnavailableError, isRelayBalanceDisabledError, listModelProviderModels } from "../services/modelProviderUsageService";
 import { prefetchCodexLaunchModels } from "../services/codexLaunchModelDiscovery";
@@ -57,6 +57,8 @@ import md5 from "blueimp-md5";
 import { CODEX_BATCH_IMPORT_SESSION_STORAGE_KEY, DEFAULT_CODEX_API_BASE_URL, inferCodexAccountProviderMode, isRelayApiProviderTemplateId, isSameHttpBaseUrl, joinFilePath, maskCodexApiKey, normalizeHttpBaseUrl, normalizePathForCompare, OPENAI_OFFICIAL_PRESET_ID, parseApiModelCatalogText, parseOAuthQuotaReservePercent, persistLastCodexCliWorkingDir, readLastCodexCliWorkingDir, sanitizeCodexCliInstanceName, type CodexCliInstanceDraft, type CodexCliLaunchModalState, type OAuthBindingQuotaReserveFieldErrors } from "./codexAccountsControllerModel";
 import { useCodexApiKeyUsageFormatting } from "./codexApiKeyUsageFormatting";
 import { renderCodexApiKeyUsagePanel } from "./codexApiKeyUsagePanel";
+import { CodexRelayAccountBalance } from "../components/codex/CodexRelayAccountBalance";
+import { CODEX_NEW_MANAGED_PROVIDER } from "./codexAccountsControllerModel";
 import type { CodexAccountsAccessControllerContext } from "./codexAccountsAccessControllerContract";
 import { DEFAULT_OAUTH_HOURLY_QUOTA_RESERVE_PERCENT, DEFAULT_OAUTH_WEEKLY_QUOTA_RESERVE_PERCENT, resolveOAuthBindingQuotaReserve } from "./codexAccountsControllerModel";
 import { useCodexAccountSync } from "../hooks/useCodexAccountSync";
@@ -2070,7 +2072,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       (providerId: string) => {
         apiProviderPresetExplicitlySelectedRef.current = true;
         setApiProviderPresetId(providerId);
-        setManagedProviderId("");
+        setManagedProviderId(providerId === CODEX_API_PROVIDER_CUSTOM_ID ? CODEX_NEW_MANAGED_PROVIDER : "");
         setManagedProviderApiKeyId("");
         setApiModelCatalogError(null);
         if (selectedManagedProviderApiKey) {
@@ -2111,6 +2113,12 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         apiProviderPresetExplicitlySelectedRef.current = true;
         setApiProviderPresetId(CODEX_API_PROVIDER_CUSTOM_ID);
         setManagedProviderId(providerId);
+        if (providerId === CODEX_NEW_MANAGED_PROVIDER) {
+          setManagedProviderApiKeyId("");
+          if (selectedManagedProviderApiKey) setApiKeyInput("");
+          if (selectedManagedProvider) setNewManagedProviderNameInput("");
+          return;
+        }
         const provider = managedProviders.find((item) => item.id === providerId);
         if (!provider) return;
         setApiBaseUrlInput(provider.baseUrl);
@@ -2133,7 +2141,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         }
         setNewManagedProviderNameInput(provider.name);
       },
-      [managedProviders],
+      [managedProviders, selectedManagedProvider, selectedManagedProviderApiKey],
     );
 
     const handleSelectManagedProviderApiKey = useCallback(
@@ -2352,11 +2360,8 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
     const openQuickSwitchProviderModal = useCallback(
       (account: CodexAccount) => {
         if (!isCodexApiKeyAccount(account)) return;
-        const baseUrl = (account.api_base_url || "").trim();
         const apiKey = (account.openai_api_key || "").trim();
-        const matchedProvider =
-          findCodexModelProviderById(managedProviders, account.api_provider_id) ??
-          findCodexModelProviderByBaseUrl(managedProviders, baseUrl);
+        const matchedProvider = findManagedCodexProviderForAccount(managedProviders, account);
         const fallbackProvider = matchedProvider ?? managedProviders[0] ?? null;
         const matchedApiKey = matchedProvider?.apiKeys.find(
           (item) => item.apiKey.trim() === apiKey,
@@ -2548,6 +2553,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
               providerName: providerPayload.apiProviderName ?? null,
               apiBaseUrl: validation.apiBaseUrl || DEFAULT_CODEX_API_BASE_URL,
               apiKey: validation.apiKey,
+              separateProvider: managedProviderId === CODEX_NEW_MANAGED_PROVIDER,
               usageApiKey: usageApiKey?.trim() || undefined,
               apiKeyName: providerPayload.accountName,
               sourceTag: providerPayload.sponsorTemplate?.id ?? null,
@@ -2983,10 +2989,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
           return account.api_provider_name.trim();
         }
         const baseUrl = (account.api_base_url || "").trim();
-        const matchedProvider = findCodexModelProviderByBaseUrl(
-          managedProviders,
-          baseUrl,
-        );
+        const matchedProvider = findManagedCodexProviderForAccount(managedProviders, account);
         if (matchedProvider) return matchedProvider.name;
         const preset = findCodexApiProviderPresetById(
           resolveCodexApiProviderPresetId(baseUrl),
@@ -3003,13 +3006,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         if (!isCodexApiKeyAccount(account) || isCodexNewApiAccount(account)) {
           return null;
         }
-        const provider =
-          findCodexModelProviderById(managedProviders, account.api_provider_id) ??
-          findCodexModelProviderByBaseUrl(
-            managedProviders,
-            resolveAccountUsageBaseUrl(account),
-          );
-        return provider ?? null;
+        return findManagedCodexProviderForAccount(managedProviders, account);
       },
       [managedProviders],
     );
@@ -3260,12 +3257,13 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         account: CodexAccount,
         provider: CodexModelProvider | null,
         variant: "card" | "table" = "card",
-      ): ReactElement =>
-        renderCodexApiKeyUsagePanel({
+      ): ReactElement => {
+        const usageState = apiKeyUsageMap[account.id];
+        const quota = renderCodexApiKeyUsagePanel({
           account,
           provider,
           variant,
-          usageState: apiKeyUsageMap[account.id],
+          usageState,
           onRefresh: () => { void refreshApiKeyUsage(account, provider); },
           t,
           formatApiKeyUsagePercent,
@@ -3275,9 +3273,13 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
           formatApiKeyUsageDetailValue,
           formatApiKeyUsageDetailByKey,
           findApiKeyUsageDetail,
-        }),
+        });
+        const showBalance = !hideRelayQuota && (provider?.newApiBalance || provider?.integrationType === "new_api" || usageState?.summary?.mode === "new_api");
+        return showBalance ? <>{quota}<CodexRelayAccountBalance provider={provider} /></> : quota;
+      },
       [
         apiKeyUsageMap,
+        hideRelayQuota,
         refreshApiKeyUsage,
         formatApiKeyUsagePercent,
         formatApiKeyUsageMoney,

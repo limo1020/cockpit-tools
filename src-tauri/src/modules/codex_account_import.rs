@@ -82,6 +82,7 @@ fn import_from_local_at_inner(codex_home: &Path) -> Result<CodexAccount, String>
             None,
             None,
             None,
+            false,
         );
     }
 
@@ -129,6 +130,7 @@ fn import_from_local_at_inner(codex_home: &Path) -> Result<CodexAccount, String>
             None,
             None,
             None,
+            false,
         );
     }
 
@@ -187,6 +189,7 @@ fn import_account_struct(account: CodexAccount) -> Result<CodexAccount, String> 
             account.account_name.clone(),
             Some(account.api_model_context_windows.clone()),
             account.api_auth_scheme.clone(),
+            false,
         )?;
         let mut changed = false;
         if !account.api_image_generation_account_ids.is_empty()
@@ -1594,6 +1597,7 @@ async fn import_account_core_from_json_value(
                 None,
                 None,
                 None,
+                false,
             )?;
             apply_api_key_import_metadata(&mut account, &value);
             save_account(&account)?;
@@ -1711,6 +1715,7 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
                 None,
                 None,
                 None,
+                false,
             )?;
             if let Some(value) = raw_value.as_ref() {
                 apply_api_key_import_metadata(&mut account, value);
@@ -1752,6 +1757,7 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
                 None,
                 None,
                 None,
+                false,
             )?;
             if let Some(value) = raw_value.as_ref() {
                 apply_api_key_import_metadata(&mut account, value);

@@ -12,16 +12,38 @@ import { Check, Copy, Eye, EyeOff, ExternalLink, HelpCircle, KeyRound, Pencil, S
 import { CodexModelContextWindowTable } from "./CodexModelContextWindowTable";
 import { CODEX_API_PROVIDER_CUSTOM_ID, CODEX_API_PROVIDER_PRESETS, DEEPSEEK_API_PROVIDER_ID, resolveOllamaLocalPlaceholderKey } from "../../utils/codexProviderPresets";
 import { canConfigureCodexProviderVision } from "../../utils/codexProviderGateway";
+import { defaultCodexNewApiBalanceWebsite, type CodexNewApiBalanceField } from "../../utils/codexNewApiBalance";
 import type { useCodexModelProviderManagerController } from './CodexModelProviderManager';
 
+const balanceFieldIds: Record<CodexNewApiBalanceField, string> = {
+  website: 'codex-provider-website',
+  userId: 'codex-provider-balance-user-id',
+  accessToken: 'codex-provider-balance-token',
+};
+
 type Props = Pick<ReturnType<typeof useCodexModelProviderManagerController>,
-  'accountEditor' | 'setAccountEditor' | 'accounts' | 'providers' | 'editorModelKeyId' | 'selectEditorModelKey' | 'selectAccountEditorProvider' | 'maskAccountText' | 'closeModal' | 'currentEditingProvider' | 'editingApiKey' | 'existingApiKeySearchQuery' | 'form' | 'formError' | 'handleDeleteApiKey' | 'handleSaveApiKeyEdit' | 'handleSaveProvider' | 'handleSelectPresetEndpoint' | 'handleSelectProviderPreset' | 'handleSelectSponsorTemplate' | 'maskApiKey' | 'mutateForm' | 'parseModelCatalogText' | 'previewPaths' | 'resolveEnableModePreferenceForWireApi' | 'saving' | 'selectedPreset' | 'selectedPresetId' | 'selectedSponsorTemplate' | 'selectedSponsorTemplateId' | 'setEditingApiKey' | 'setExistingApiKeySearchQuery' | 'showModal' | 'sponsorProviderTemplates' | 't'>;
+  'balanceErrorField' | 'accountEditor' | 'setAccountEditor' | 'accounts' | 'providers' | 'editorModelKeyId' | 'selectEditorModelKey' | 'selectAccountEditorProvider' | 'maskAccountText' | 'closeModal' | 'currentEditingProvider' | 'editingApiKey' | 'existingApiKeySearchQuery' | 'form' | 'formError' | 'handleDeleteApiKey' | 'handleSaveApiKeyEdit' | 'handleSaveProvider' | 'handleSelectPresetEndpoint' | 'handleSelectProviderPreset' | 'handleSelectSponsorTemplate' | 'maskApiKey' | 'mutateForm' | 'parseModelCatalogText' | 'previewPaths' | 'resolveEnableModePreferenceForWireApi' | 'saving' | 'selectedPreset' | 'selectedPresetId' | 'selectedSponsorTemplate' | 'selectedSponsorTemplateId' | 'setEditingApiKey' | 'setExistingApiKeySearchQuery' | 'showModal' | 'sponsorProviderTemplates' | 't'>;
 
 export function CodexModelProviderEditor(props: Props) {
   const { accountEditor, setAccountEditor, accounts, providers, editorModelKeyId, selectEditorModelKey, selectAccountEditorProvider, maskAccountText, closeModal, currentEditingProvider, editingApiKey, existingApiKeySearchQuery, form, formError, handleDeleteApiKey, handleSaveApiKeyEdit, handleSaveProvider, handleSelectPresetEndpoint, handleSelectProviderPreset, handleSelectSponsorTemplate, maskApiKey, mutateForm, parseModelCatalogText, previewPaths, resolveEnableModePreferenceForWireApi, saving, selectedPreset, selectedPresetId, selectedSponsorTemplate, selectedSponsorTemplateId, setEditingApiKey, setExistingApiKeySearchQuery, showModal, sponsorProviderTemplates, t } = props;
   useModalScrollLock(showModal);
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [apiKeyCopied, setApiKeyCopied] = useState(false);
+  const { balanceErrorField } = props;
+  const balanceDetails = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (!showModal || !balanceErrorField) return;
+    if (balanceErrorField !== 'website' && balanceDetails.current) balanceDetails.current.open = true;
+    document.getElementById(balanceFieldIds[balanceErrorField])?.focus();
+  }, [balanceErrorField, showModal]);
+  const balanceFieldProps = (field: CodexNewApiBalanceField) => ({
+    id: balanceFieldIds[field],
+    'aria-invalid': balanceErrorField === field || undefined,
+    'aria-describedby': balanceErrorField === field ? `${balanceFieldIds[field]}-error` : undefined,
+  });
+  const balanceFieldMessage = (field: CodexNewApiBalanceField, message: string) => balanceErrorField === field && (
+    <p id={`${balanceFieldIds[field]}-error`} className="codex-provider-balance-error" role="alert">{message}</p>
+  );
   const copyError = useModalErrorState();
   const copyVersion = useRef(0);
   useEffect(() => {
@@ -528,19 +550,37 @@ export function CodexModelProviderEditor(props: Props) {
                 </>
               )}
               <div className="form-group">
-                <label>
+                <label htmlFor="codex-provider-website">
                   {t("codex.modelProviders.fields.website", "官网（可选）")}
                 </label>
                 <input
+                  {...balanceFieldProps('website')}
                   className="form-input"
                   type="text"
                   value={form.website}
-                  onChange={(event) =>
-                    mutateForm({ website: event.target.value })
-                  }
+                  placeholder={defaultCodexNewApiBalanceWebsite(form.baseUrl)}
+                  onChange={event => mutateForm({ website: event.target.value })}
                   disabled={saving}
                 />
+                {balanceFieldMessage('website', t('codex.newApi.balance.invalidWebsite', 'Enter the HTTPS address of the relay website.'))}
               </div>
+              {!isOpenAIOfficialUsageUrl(form.baseUrl) && <details ref={balanceDetails} className="openai-usage-optional" open={currentEditingProvider?.newApiBalance ? true : undefined}>
+                <summary>{t("codex.newApi.balance.settings", "Relay account balance (New API)")}</summary>
+                <p className="api-provider-hint">{t("codex.newApi.balance.hint", "Enter the relay website above. Copy your user ID and system access token from the website's personal settings.")}</p>
+                <div className="form-group">
+                  <label htmlFor="codex-provider-balance-user-id">{t("codex.newApi.balance.userId", "User ID")}</label>
+                  <input {...balanceFieldProps('userId')} className="form-input" autoCapitalize="none" spellCheck={false}
+                    value={form.balanceUserId} onChange={event => mutateForm({ balanceUserId: event.target.value })}
+                    disabled={saving} />
+                  {balanceFieldMessage('userId', t('codex.newApi.balance.invalidUserId', 'Enter the complete user ID from the relay website. Letters and numbers are supported.'))}
+                </div>
+                <div className="form-group">
+                  <label htmlFor="codex-provider-balance-token">{t("codex.newApi.balance.accessToken", "System access token")}</label>
+                  <input {...balanceFieldProps('accessToken')} className="form-input" type="password" autoComplete="new-password"
+                    value={form.balanceAccessToken} onChange={event => mutateForm({ balanceAccessToken: event.target.value })} disabled={saving} />
+                  {balanceFieldMessage('accessToken', t('codex.newApi.balance.invalidAccessToken', 'Paste the system access token from the website’s security settings.'))}
+                </div>
+              </details>}
               <div className="form-group">
                 <label>
                   {t(

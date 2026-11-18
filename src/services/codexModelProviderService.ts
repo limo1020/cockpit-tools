@@ -30,7 +30,8 @@ import {
 import { moveCodexProviderApiKey } from '../utils/codexModelProviderApiKeyMove';
 import { migrateCodexModelProviderVisionCapabilities } from '../utils/codexModelProviderVisionMigration';
 import { cloneCodexProviderModelConfig, type CodexProviderModelConfig } from '../utils/codexModelProviderKeyConfig';
-import { findCodexAccountsForModelProviderDeletion } from '../utils/codexModelProviderAccountSync';
+import { findCodexAccountsForModelProviderDeletion, matchCodexModelProviderEndpoint } from '../utils/codexModelProviderAccountSync';
+import { normalizeCodexNewApiBalanceConfig, type CodexNewApiBalanceConfig } from '../utils/codexNewApiBalance';
 
 export interface CodexModelProviderApiKey extends CodexProviderModelConfig {
   id: string;
@@ -58,6 +59,7 @@ export interface CodexModelProvider {
   visionRoutingModel?: string;
   boundInstanceId?: string;
   website?: string;
+  newApiBalance?: CodexNewApiBalanceConfig;
   apiKeyUrl?: string;
   authScheme?: 'x-api-key' | 'bearer';
   wireApi?: CodexProviderWireApi | null;
@@ -81,6 +83,7 @@ interface UpsertFromCredentialInput {
   providerName?: string | null;
   apiBaseUrl: string;
   apiKey: string;
+  separateProvider?: boolean;
   usageApiKey?: string;
   apiKeyName?: string | null;
   sourceTag?: string | null;
@@ -415,6 +418,7 @@ function deriveProviderNameFromBaseUrl(baseUrl: string): string {
 function cloneProviders(providers: CodexModelProvider[]): CodexModelProvider[] {
   return providers.map((provider) => ({
     ...provider,
+    newApiBalance: normalizeCodexNewApiBalanceConfig(provider.newApiBalance, provider.website),
     customUsage: normalizeCustomProviderUsage(provider.customUsage),
     modelCapabilities: provider.modelCapabilities
       ? Object.fromEntries(
@@ -467,21 +471,23 @@ function toValidProviderList(raw: unknown): CodexModelProvider[] {
   if (!Array.isArray(raw)) return [];
   const now = Date.now();
   const providers: CodexModelProvider[] = [];
-  const seenBaseUrls = new Set<string>();
+  const seenIds = new Set<string>();
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const name = sanitizeName(String((item as { name?: unknown }).name ?? ''));
     const baseUrl = normalizeBaseUrlForStore(String((item as { baseUrl?: unknown }).baseUrl ?? ''));
     const normalizedBaseUrl = normalizeCodexModelProviderBaseUrl(baseUrl);
     if (!name || !baseUrl || !normalizedBaseUrl) continue;
-    if (seenBaseUrls.has(normalizedBaseUrl)) continue;
-    seenBaseUrls.add(normalizedBaseUrl);
+    const id = String((item as { id?: unknown }).id ?? createProviderId());
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
     const boundOauthAccountId = normalizeBoundOauthAccountId(
       (item as { boundOauthAccountId?: unknown }).boundOauthAccountId,
     );
     const wireApi = normalizeWireApi((item as { wireApi?: unknown }).wireApi);
+    const website = sanitizeName(String((item as { website?: unknown }).website ?? '')) || undefined;
     providers.push({
-      id: String((item as { id?: unknown }).id ?? createProviderId()),
+      id,
       name,
       baseUrl,
       sourceTag: sanitizeName(String((item as { sourceTag?: unknown }).sourceTag ?? '')) || undefined,
@@ -510,7 +516,8 @@ function toValidProviderList(raw: unknown): CodexModelProvider[] {
       boundInstanceId: normalizeBoundInstanceId(
         (item as { boundInstanceId?: unknown }).boundInstanceId,
       ),
-      website: sanitizeName(String((item as { website?: unknown }).website ?? '')) || undefined,
+      website,
+      newApiBalance: normalizeCodexNewApiBalanceConfig(item.newApiBalance, website),
       apiKeyUrl: sanitizeName(String((item as { apiKeyUrl?: unknown }).apiKeyUrl ?? '')) || undefined,
       authScheme: (item as { authScheme?: unknown }).authScheme === 'bearer' ? 'bearer' : 'x-api-key',
       wireApi,
@@ -630,7 +637,14 @@ export const mergeCodexModelProviderApiKeysFromAccounts = serializedProviderMuta
   options?: { explicitImport?: boolean },
 ): Promise<CodexModelProvider[]> {
   const providers = await ensureProvidersLoaded();
-  const byEndpoint = new Map(providers.map(provider => [normalizeCodexModelProviderBaseUrl(provider.baseUrl), provider]));
+  const byEndpoint = new Map<string, CodexModelProvider[]>();
+  for (const provider of providers) {
+    const endpoint = normalizeCodexModelProviderBaseUrl(provider.baseUrl);
+    if (!endpoint) continue;
+    const matches = byEndpoint.get(endpoint) ?? [];
+    matches.push(provider);
+    byEndpoint.set(endpoint, matches);
+  }
   let changed = false;
   const now = Date.now();
   for (const [index, account] of accounts.entries()) {
@@ -641,12 +655,14 @@ export const mergeCodexModelProviderApiKeysFromAccounts = serializedProviderMuta
     const baseUrl = normalizeBaseUrlForStore(resolveAccountUsageBaseUrl(account));
     const endpoint = normalizeCodexModelProviderBaseUrl(baseUrl);
     if (!apiKey || !endpoint) continue;
-    let provider = byEndpoint.get(endpoint);
+    const matches = byEndpoint.get(endpoint) ?? [];
+    let provider = matchCodexModelProviderEndpoint(matches, baseUrl, apiKey, account.api_provider_id);
+    if (!provider && matches.length > 1 && !options?.explicitImport) continue;
     if (provider?.deletedAt) {
       if (!options?.explicitImport) continue;
       providers.splice(providers.indexOf(provider), 1);
-      byEndpoint.delete(endpoint);
-      provider = undefined;
+      matches.splice(matches.indexOf(provider), 1);
+      provider = null;
     }
     if (!provider) {
       const preset = findCodexApiProviderPresetById(isOpenAIOfficialUsageUrl(baseUrl) ? "openai_official" : resolveCodexApiProviderPresetId(baseUrl));
@@ -668,7 +684,8 @@ export const mergeCodexModelProviderApiKeysFromAccounts = serializedProviderMuta
       };
       enforceDeepSeekProvider(provider);
       providers.push(provider);
-      byEndpoint.set(endpoint, provider);
+      matches.push(provider);
+      byEndpoint.set(endpoint, matches);
       changed = true;
     }
     if (provider.apiKeys.some(item => sanitizeApiKey(item.apiKey) === apiKey)) continue;
@@ -709,14 +726,26 @@ export function findCodexModelProviderById(
 export function findCodexModelProviderByBaseUrl(
   providers: CodexModelProvider[],
   baseUrl: string,
+  apiKey?: string | null,
 ): CodexModelProvider | null {
-  const normalized = normalizeCodexModelProviderBaseUrl(baseUrl);
-  if (!normalized) return null;
-  return (
-    providers.find(
-      (provider) => normalizeCodexModelProviderBaseUrl(provider.baseUrl) === normalized,
-    ) ?? null
-  );
+  return matchCodexModelProviderEndpoint(providers, baseUrl, apiKey);
+}
+
+function assertProviderCredentialAvailable(
+  providers: readonly CodexModelProvider[],
+  endpoint: string,
+  apiKey: string,
+  ownerId?: string,
+  previousOwnerId?: string | null,
+): void {
+  const key = sanitizeApiKey(apiKey);
+  if (!key) return;
+  if (providers.some(provider => !provider.deletedAt && provider.id !== ownerId
+    && provider.id !== previousOwnerId
+    && normalizeCodexModelProviderBaseUrl(provider.baseUrl) === endpoint
+    && provider.apiKeys.some(item => sanitizeApiKey(item.apiKey) === key))) {
+    throw new Error('API_KEY_EXISTS');
+  }
 }
 
 function ensureApiKeyOnProvider(
@@ -753,6 +782,7 @@ export const createCodexModelProvider = serializedProviderMutation(async functio
   visionRoutingModel?: string;
   boundInstanceId?: string;
   website?: string;
+  newApiBalance?: CodexNewApiBalanceConfig;
   apiKeyUrl?: string;
   authScheme?: 'x-api-key' | 'bearer';
   wireApi?: CodexProviderWireApi;
@@ -770,10 +800,9 @@ export const createCodexModelProvider = serializedProviderMutation(async functio
   const normalizedBaseUrl = normalizeCodexModelProviderBaseUrl(baseUrl);
   if (!name) throw new Error('PROVIDER_NAME_REQUIRED');
   if (!normalizedBaseUrl) throw new Error('PROVIDER_BASE_URL_INVALID');
-  const providers = (await ensureProvidersLoaded()).filter(item => !(item.deletedAt && normalizeCodexModelProviderBaseUrl(item.baseUrl) === normalizedBaseUrl));
-  if (providers.some((item) => normalizeCodexModelProviderBaseUrl(item.baseUrl) === normalizedBaseUrl)) {
-    throw new Error('PROVIDER_BASE_URL_EXISTS');
-  }
+  const providers = await ensureProvidersLoaded();
+  assertProviderCredentialAvailable(providers, normalizedBaseUrl, input.initialApiKey ?? '');
+  const hasLiveProvider = providers.some(item => !item.deletedAt && normalizeCodexModelProviderBaseUrl(item.baseUrl) === normalizedBaseUrl);
   const now = Date.now();
   const wireApi = normalizeWireApi(input.wireApi);
   const provider: CodexModelProvider = {
@@ -797,6 +826,7 @@ export const createCodexModelProvider = serializedProviderMutation(async functio
     visionRoutingModel: sanitizeName(input.visionRoutingModel ?? '') || undefined,
     boundInstanceId: normalizeBoundInstanceId(input.boundInstanceId),
     website: sanitizeName(input.website ?? '') || undefined,
+    newApiBalance: normalizeCodexNewApiBalanceConfig(input.newApiBalance, input.website),
     apiKeyUrl: sanitizeName(input.apiKeyUrl ?? '') || undefined,
     authScheme: input.authScheme === 'bearer' ? 'bearer' : 'x-api-key',
     wireApi,
@@ -816,7 +846,8 @@ export const createCodexModelProvider = serializedProviderMutation(async functio
     }
   }
   providers.push(provider);
-  await writeProviders(providers);
+  await writeProviders(hasLiveProvider ? providers : providers.filter(item =>
+    !item.deletedAt || normalizeCodexModelProviderBaseUrl(item.baseUrl) !== normalizedBaseUrl));
   return { ...provider, apiKeys: provider.apiKeys.map((apiKey) => ({ ...apiKey })) };
 });
 
@@ -833,6 +864,7 @@ export const updateCodexModelProvider = serializedProviderMutation(async functio
     visionRoutingModel?: string | null;
     boundInstanceId?: string | null;
     website?: string;
+    newApiBalance?: CodexNewApiBalanceConfig | null;
     apiKeyUrl?: string;
     authScheme?: 'x-api-key' | 'bearer';
   wireApi?: CodexProviderWireApi | null;
@@ -860,13 +892,14 @@ export const updateCodexModelProvider = serializedProviderMutation(async functio
   if (!nextName) throw new Error('PROVIDER_NAME_REQUIRED');
   if (!normalizedBaseUrl) throw new Error('PROVIDER_BASE_URL_INVALID');
 
-  const duplicated = providers.find(
-    (item) =>
-      !item.deletedAt &&
-      item.id !== providerId &&
-      normalizeCodexModelProviderBaseUrl(item.baseUrl) === normalizedBaseUrl,
-  );
-  if (duplicated) throw new Error('PROVIDER_BASE_URL_EXISTS');
+  const endpointChanged = normalizedBaseUrl !== normalizeCodexModelProviderBaseUrl(provider.baseUrl);
+  const restoringEndpoint = endpointChanged && !providers.some(item =>
+    !item.deletedAt && normalizeCodexModelProviderBaseUrl(item.baseUrl) === normalizedBaseUrl);
+  if (endpointChanged) {
+    for (const key of provider.apiKeys) {
+      assertProviderCredentialAvailable(providers, normalizedBaseUrl, key.apiKey, providerId);
+    }
+  }
 
   provider.name = nextName;
   provider.baseUrl = nextBaseUrl;
@@ -917,6 +950,12 @@ export const updateCodexModelProvider = serializedProviderMutation(async functio
   if (patch.website !== undefined) {
     provider.website = sanitizeName(patch.website) || undefined;
   }
+  if (patch.newApiBalance !== undefined || patch.website !== undefined) {
+    provider.newApiBalance = normalizeCodexNewApiBalanceConfig(
+      patch.newApiBalance === undefined ? provider.newApiBalance : patch.newApiBalance,
+      provider.website,
+    );
+  }
   if (patch.apiKeyUrl !== undefined) {
     provider.apiKeyUrl = sanitizeName(patch.apiKeyUrl) || undefined;
   }
@@ -956,7 +995,8 @@ export const updateCodexModelProvider = serializedProviderMutation(async functio
     Object.assign(modelKey, normalizeApiKeyModelConfig(patch.keyModelConfig.config));
     modelKey.updatedAt = provider.updatedAt;
   }
-  await writeProviders(providers.filter(item => !item.deletedAt || normalizeCodexModelProviderBaseUrl(item.baseUrl) !== normalizedBaseUrl));
+  await writeProviders(restoringEndpoint ? providers.filter(item =>
+    !item.deletedAt || normalizeCodexModelProviderBaseUrl(item.baseUrl) !== normalizedBaseUrl) : providers);
   return { ...provider, apiKeys: provider.apiKeys.map((apiKey) => ({ ...apiKey })) };
 });
 
@@ -969,6 +1009,7 @@ export const addApiKeyToCodexModelProvider = serializedProviderMutation(async fu
   const providers = await ensureProvidersLoaded();
   const provider = providers.find((item) => item.id === providerId);
   if (!provider || provider.deletedAt) throw new Error('PROVIDER_NOT_FOUND');
+  assertProviderCredentialAvailable(providers, normalizeCodexModelProviderBaseUrl(provider.baseUrl)!, apiKey, providerId);
   ensureApiKeyOnProvider(provider, apiKey, apiKeyName);
   if (usageApiKey?.trim() && isOpenAIOfficialUsageUrl(provider.baseUrl)) {
     const key = provider.apiKeys.find(item => item.apiKey.trim() === apiKey.trim())!;
@@ -1044,6 +1085,7 @@ export const updateApiKeyOnCodexModelProvider = serializedProviderMutation(async
     (item) => item.id !== apiKeyId && sanitizeApiKey(item.apiKey) === normalizedApiKey,
   );
   if (duplicate) throw new Error("API_KEY_EXISTS");
+  assertProviderCredentialAvailable(providers, normalizeCodexModelProviderBaseUrl(provider.baseUrl)!, normalizedApiKey, providerId);
 
   const now = Date.now();
   existing.apiKey = normalizedApiKey;
@@ -1225,9 +1267,16 @@ export const upsertCodexModelProviderFromCredential = serializedProviderMutation
   }
   const providers = await ensureProvidersLoaded();
   let provider = findCodexModelProviderById(providers, input.providerId);
-  if (!provider) {
-    provider = findCodexModelProviderByBaseUrl(providers, apiBaseUrl);
+  if (!provider && input.separateProvider) {
+    provider = providers.find(item => !item.deletedAt && normalizeCodexModelProviderBaseUrl(item.baseUrl) === normalizedBaseUrl
+      && item.apiKeys.some(key => key.apiKey.trim() === apiKey)) ?? null;
+    if (provider && input.providerName?.trim() && sanitizeName(input.providerName) !== provider.name) {
+      throw new Error('API_KEY_EXISTS');
+    }
+  } else if (!provider) {
+    provider = findCodexModelProviderByBaseUrl(providers, apiBaseUrl, apiKey);
   }
+  assertProviderCredentialAvailable(providers, normalizedBaseUrl, apiKey, provider?.id, input.previousProviderId);
 
   if (!provider) {
     const now = Date.now();
@@ -1257,7 +1306,7 @@ export const upsertCodexModelProviderFromCredential = serializedProviderMutation
       updatedAt: now,
     };
     providers.push(provider);
-  } else if (input.providerName && sanitizeName(input.providerName)) {
+  } else if (!input.separateProvider && input.providerName && sanitizeName(input.providerName)) {
     provider.name = sanitizeName(input.providerName);
     provider.updatedAt = Date.now();
   }
@@ -1314,6 +1363,7 @@ export const upsertCodexModelProviderFromCredential = serializedProviderMutation
 export function countCodexModelProviderReferences(
   provider: CodexModelProvider,
   accounts: CodexAccount[],
+  allProviders?: readonly CodexModelProvider[],
 ): number {
-  return findCodexAccountsForModelProviderDeletion([provider], accounts).length;
+  return findCodexAccountsForModelProviderDeletion([provider], accounts, allProviders).length;
 }

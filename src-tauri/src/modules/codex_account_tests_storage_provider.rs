@@ -2146,6 +2146,7 @@ supports_websockets = false
             Some("Relay Key".to_string()),
             None,
             None,
+            false,
         )
         .expect("create API key account");
         assert!(created.api_sync_model_catalog_to_codex);
@@ -2166,6 +2167,7 @@ supports_websockets = false
             None,
             None,
             None,
+            false,
         )
         .expect("upsert API key account without sync preference");
         assert!(updated.api_sync_model_catalog_to_codex);

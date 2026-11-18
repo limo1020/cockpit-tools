@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useEscCloseTopmost } from "../hooks/useEscClose";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, GripVertical } from "lucide-react";
 import "./SingleSelectDropdown.css";
 import { dropdownLayer, dropdownPlacement, type DropdownPlacement } from "../utils/dropdownPlacement";
 
@@ -27,6 +27,7 @@ interface SingleSelectDropdownProps {
   menuPlacement?: "down" | "up";
   menuWidth?: number;
   menuMaxHeight?: number;
+  reorder?: { onMove: (from: string, to: string) => void; handleLabel: string };
 }
 
 export function SingleSelectDropdown({
@@ -42,6 +43,7 @@ export function SingleSelectDropdown({
   menuPlacement = "down",
   menuWidth,
   menuMaxHeight = 280,
+  reorder,
 }: SingleSelectDropdownProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -50,7 +52,50 @@ export function SingleSelectDropdown({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const drag = useRef<{ value: string; pointerId: number; x: number; y: number } | null>(null);
+  const dragFrame = useRef<number | null>(null);
+  const deferredMenuPosition = useRef<(() => void) | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ value: string; edge: "before" | "after" } | null>(null);
   const listId = useId();
+
+  const finishDrag = () => {
+    drag.current = null;
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = null;
+    setDropTarget(null);
+    deferredMenuPosition.current?.();
+    deferredMenuPosition.current = null;
+  };
+
+  useEffect(() => () => {
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+  }, []);
+
+  function pointerTarget(x: number, y: number) {
+    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-option-value]");
+    return row && menuRef.current?.contains(row) ? row.dataset.optionValue : undefined;
+  }
+
+  function updateDrag() {
+    const current = drag.current;
+    const menu = menuRef.current;
+    if (!current || !menu) return;
+    const rect = menu.getBoundingClientRect();
+    if (current.x >= rect.left && current.x < rect.right && current.y >= rect.top && current.y < rect.bottom) {
+      const edge = 28;
+      const top = current.y - rect.top;
+      const bottom = rect.bottom - current.y;
+      if (top < edge) menu.scrollTop -= Math.ceil((edge - top) / 4);
+      else if (bottom < edge) menu.scrollTop += Math.ceil((edge - bottom) / 4);
+    }
+    const to = pointerTarget(current.x, current.y);
+    if (!to || to === current.value) setDropTarget(null);
+    else {
+      const edge = options.findIndex(item => item.value === current.value) < options.findIndex(item => item.value === to) ? "after" : "before";
+      setDropTarget(previous => previous?.value === to && previous.edge === edge ? previous : { value: to, edge });
+    }
+    dragFrame.current = requestAnimationFrame(updateDrag);
+  }
 
   const closeMenu = () => { setOpen(false); triggerRef.current?.focus(); };
   useEscCloseTopmost(open, closeMenu, menuRef);
@@ -62,7 +107,10 @@ export function SingleSelectDropdown({
     }
   }, [open, Boolean(menuStyle)]);
   useEffect(() => {
-    if (!open) setQuery("");
+    if (!open) {
+      setQuery("");
+      finishDrag();
+    }
   }, [open]);
 
   const selectedOption = useMemo(
@@ -80,6 +128,11 @@ export function SingleSelectDropdown({
         eventTarget instanceof Node &&
         menuRef.current?.contains(eventTarget)
       ) {
+        return;
+      }
+      // Keep the rows under the pointer when WebView2 scrolls the outer form.
+      if (drag.current) {
+        deferredMenuPosition.current = () => updateMenuPosition();
         return;
       }
       const rect = triggerRef.current?.getBoundingClientRect();
@@ -120,6 +173,7 @@ export function SingleSelectDropdown({
     window.addEventListener("scroll", updateMenuPosition, true);
 
     return () => {
+      deferredMenuPosition.current = null;
       window.clearTimeout(timer);
       document.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("resize", updateMenuPosition);
@@ -137,6 +191,7 @@ export function SingleSelectDropdown({
   const visibleOptions = normalizedQuery
     ? options.filter((option) => option.label.toLowerCase().includes(normalizedQuery))
     : options;
+  const activeReorder = normalizedQuery ? undefined : reorder;
 
   return (
     <div
@@ -209,6 +264,16 @@ export function SingleSelectDropdown({
                 }
                 if (!items.length) return;
                 const index = items.indexOf(active as HTMLElement);
+                if (activeReorder && index >= 0 && event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+                  event.preventDefault();
+                  const from = items[index].dataset.optionValue;
+                  const to = items[index + (event.key === "ArrowUp" ? -1 : 1)]?.dataset.optionValue;
+                  if (from && to) {
+                    activeReorder.onMove(from, to);
+                    requestAnimationFrame(() => items[index].focus());
+                  }
+                  return;
+                }
                 if (searchRef.current && (
                   (event.key === "ArrowUp" && index === 0) ||
                   (event.key === "ArrowDown" && index === items.length - 1)
@@ -239,11 +304,14 @@ export function SingleSelectDropdown({
               <div id={listId} role="listbox" aria-label={ariaLabel}>
                 {visibleOptions.map((option) => {
                   const active = option.value === value;
+                  const reorderable = activeReorder && !option.disabled;
+                  const dropClass = dropTarget?.value === option.value ? ` drop-${dropTarget.edge}` : "";
                   return (
                     <button
                       key={option.value}
                       type="button"
-                      className={`single-select-dropdown-item${active ? " active" : ""}`}
+                      className={`single-select-dropdown-item${active ? " active" : ""}${dropClass}`}
+                      data-option-value={reorderable ? option.value : undefined}
                       disabled={option.disabled}
                       onClick={() => {
                         if (option.disabled) return;
@@ -253,8 +321,36 @@ export function SingleSelectDropdown({
                       role="option"
                       aria-selected={active}
                       aria-disabled={option.disabled || undefined}
+                      aria-keyshortcuts={reorderable ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
                       tabIndex={search ? -1 : undefined}
                     >
+                      {reorderable && <span className="single-select-dropdown-drag-handle" title={activeReorder.handleLabel}
+                        aria-hidden="true" onClick={event => event.stopPropagation()}
+                        onPointerDown={event => {
+                          if (event.button !== 0 || !event.isPrimary || drag.current) return;
+                          event.preventDefault();
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          drag.current = { value: option.value, pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+                        }}
+                        onPointerMove={event => {
+                          const current = drag.current;
+                          if (current?.pointerId !== event.pointerId) return;
+                          current.x = event.clientX;
+                          current.y = event.clientY;
+                          if (dragFrame.current === null) updateDrag();
+                        }}
+                        onPointerUp={event => {
+                          const current = drag.current;
+                          if (current?.pointerId !== event.pointerId) return;
+                          const to = pointerTarget(event.clientX, event.clientY);
+                          finishDrag();
+                          if (to && to !== current.value) activeReorder.onMove(current.value, to);
+                        }}
+                        onLostPointerCapture={event => {
+                          if (drag.current?.pointerId === event.pointerId) finishDrag();
+                        }}>
+                        <GripVertical size={15} />
+                      </span>}
                       <span
                         className="single-select-dropdown-item-label"
                         title={option.label}

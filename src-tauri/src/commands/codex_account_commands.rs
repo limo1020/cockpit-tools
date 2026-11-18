@@ -2527,6 +2527,7 @@ pub fn add_codex_account_with_api_key(
     account_name: Option<String>,
     api_model_context_windows: Option<std::collections::HashMap<String, i64>>,
     api_auth_scheme: Option<String>,
+    create_only: Option<bool>,
 ) -> Result<CodexAccount, String> {
     let account = codex_account::upsert_api_key_account(
         api_key,
@@ -2544,6 +2545,7 @@ pub fn add_codex_account_with_api_key(
         account_name,
         api_model_context_windows,
         api_auth_scheme.clone(),
+        create_only.unwrap_or(false),
     )?;
     codex_account::load_account(&account.id).ok_or_else(|| "账号保存后无法读取".to_string())
 }

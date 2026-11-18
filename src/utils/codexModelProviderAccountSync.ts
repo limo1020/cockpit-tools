@@ -18,6 +18,7 @@ import { resolveProviderModelVisionState } from "./codexModelProviderVision";
 export interface CodexModelProviderReference {
   id: string;
   baseUrl: string;
+  apiKeys?: readonly { apiKey: string }[];
 }
 
 export interface CodexModelProviderAccountSnapshot {
@@ -70,6 +71,7 @@ export function mergeCodexModelProviderCredentialInput(
     providerName?: string | null;
     apiBaseUrl: string;
     apiKey: string;
+    separateProvider?: boolean;
     apiKeyName?: string | null;
     usageApiKey?: string;
     sourceTag?: string | null;
@@ -131,24 +133,51 @@ function normalizeBaseUrl(value?: string | null): string | null {
   }
 }
 
+export function matchCodexModelProviderEndpoint<T extends CodexModelProviderReference>(
+  providers: readonly T[],
+  baseUrl: string,
+  apiKey?: string | null,
+  providerId?: string | null,
+): T | null {
+  const endpoint = normalizeBaseUrl(baseUrl);
+  if (!endpoint) return null;
+  const matches = providers.filter(provider => normalizeBaseUrl(provider.baseUrl) === endpoint);
+  const id = providerId?.trim();
+  const key = apiKey?.trim();
+  const named = id ? matches.find(provider => provider.id === id) : undefined;
+  if (named) return named;
+  const owners = key ? matches.filter(provider => provider.apiKeys?.some(item => item.apiKey.trim() === key)) : [];
+  return owners.length === 1 ? owners[0] : matches.length === 1 ? matches[0] : null;
+}
+
+export function findManagedCodexProviderForAccount<T extends CodexModelProviderReference>(
+  providers: readonly T[],
+  account: CodexAccount,
+): T | null {
+  return matchCodexModelProviderEndpoint(
+    providers, resolveAccountUsageBaseUrl(account), account.openai_api_key, account.api_provider_id,
+  );
+}
+
+function resolveAccountProviderOwner(
+  providers: readonly CodexModelProviderReference[],
+  account: CodexAccount,
+): CodexModelProviderReference | null {
+  // An explicit managed provider ID is still its owner when the account snapshot is stale.
+  return providers.find(provider => provider.id === account.api_provider_id?.trim())
+    ?? findManagedCodexProviderForAccount(providers, account);
+}
+
 export function findCodexAccountsReferencingModelProvider(
   provider: CodexModelProviderReference,
   accounts: CodexAccount[],
+  allProviders: readonly CodexModelProviderReference[] = [provider],
 ): string[] {
-  const providerId = provider.id.trim();
-  const providerBaseUrl = normalizeBaseUrl(provider.baseUrl);
-
   return accounts
     .filter((account) => {
       if ((account.auth_mode ?? "").toLowerCase() !== "apikey") return false;
       if (!account.openai_api_key?.trim()) return false;
-
-      const matchesId =
-        providerId.length > 0 && account.api_provider_id?.trim() === providerId;
-      const accountBaseUrl = normalizeBaseUrl(resolveAccountUsageBaseUrl(account));
-      const matchesBaseUrl =
-        providerBaseUrl !== null && accountBaseUrl === providerBaseUrl;
-      return matchesId || matchesBaseUrl;
+      return resolveAccountProviderOwner(allProviders, account)?.id === provider.id;
     })
     .map((account) => account.id);
 }
@@ -157,13 +186,13 @@ export function findCodexAccountsReferencingModelProvider(
 export function findCodexAccountsForModelProviderDeletion(
   providers: CodexModelProviderReference[],
   accounts: CodexAccount[],
+  allProviders: readonly CodexModelProviderReference[] = providers,
 ): string[] {
-  const providerIds = new Set(providers.map(provider => provider.id.trim()).filter(Boolean));
-  const baseUrls = new Set(providers.map(provider => normalizeBaseUrl(provider.baseUrl)).filter(Boolean));
+  const providerIds = new Set(providers.map(provider => provider.id));
   return accounts.filter(account => {
     if ((account.auth_mode ?? "").trim().toLowerCase() !== "apikey") return false;
-    return providerIds.has(account.api_provider_id?.trim() ?? "")
-      || baseUrls.has(normalizeBaseUrl(resolveAccountUsageBaseUrl(account)));
+    const owner = resolveAccountProviderOwner(allProviders, account);
+    return owner != null && providerIds.has(owner.id);
   }).map(account => account.id);
 }
 

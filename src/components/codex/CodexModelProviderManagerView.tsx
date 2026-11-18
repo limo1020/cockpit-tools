@@ -1,5 +1,6 @@
 import { canShowCodexProviderBalance } from "../../utils/codexDeepSeekAccess";
 import { ModelProviderUsagePanel } from "../model-provider/ModelProviderUsagePanel";
+import { CodexRelayAccountBalance } from "./CodexRelayAccountBalance";
 import { presentNewApiQuota, resolveNewApiQuotaSnapshot } from "../../services/modelProviderUsageService";
 import { OpenAIOfficialUsagePanel } from './OpenAIOfficialUsagePanel';
 import { currentOpenAIUsageState, isOpenAIOfficialUsageUrl } from '../../utils/openaiOfficialUsage';
@@ -664,12 +665,12 @@ export function CodexModelProviderManagerView(props: CodexModelProviderManagerVi
                     <div className="codex-api-key-usage-panel">
                       <div
                         className="quota-item codex-api-key-quota-item new-api"
-                        title={`${t("codex.cockpitApi.balance", "额度")}：${newApiQuota.text}`}
+                        title={`${t("codex.newApi.balance.keyQuota", "API Key quota")}：${newApiQuota.text}`}
                       >
                         <div className="quota-header">
                           <Database size={14} />
                           <span className="quota-label">
-                            {t("codex.cockpitApi.balance", "额度")}
+                            {t("codex.newApi.balance.keyQuota", "API Key quota")}
                           </span>
                           <span className="quota-pct high">
                             {newApiQuota.text}
@@ -691,6 +692,9 @@ export function CodexModelProviderManagerView(props: CodexModelProviderManagerVi
                     <div className="codex-api-key-usage-panel empty">
                       {t("codex.modelProviders.usage.noKey", "暂无可查询额度")}
                     </div>
+                  )}
+                  {!relayBalanceDisabled && (provider.newApiBalance || usageMode === "new_api") && (
+                    <CodexRelayAccountBalance provider={provider} refreshKey={usageState?.updatedAt} />
                   )}
                 </div>}
                 <div className="codex-card-bottom">
@@ -2242,7 +2246,7 @@ export function CodexModelProviderManagerView(props: CodexModelProviderManagerVi
             baseUrl={provider.baseUrl}
             apiKeyDisplay={primaryApiKey ? maskApiKey(primaryApiKey.apiKey) : "-"}
             rawApiKey={primaryApiKey?.apiKey}
-            connectionExtra={isOpenAIOfficialUsageUrl(provider.baseUrl)
+            connectionExtra={<>{isOpenAIOfficialUsageUrl(provider.baseUrl)
               ? <OpenAIOfficialUsagePanel provider={provider} apiKey={primaryApiKey?.apiKey ?? ""} sourceBinding={usageState?.sourceBinding} onRefresh={() => void refreshProviderUsage(provider, primaryApiKey)} summary={usageSummary} loading={usageState?.loading} error={usageState?.error} detailed t={t} />
               : showBalance && (provider.customUsage || usageSummary?.mode === "custom"
                 ? <ModelProviderUsagePanel
@@ -2256,6 +2260,12 @@ export function CodexModelProviderManagerView(props: CodexModelProviderManagerVi
                     {usageState?.loading && <p className="codex-daily-usage-note" role="status">{t("common.loading")}</p>}
                     {usageState?.error && <p className="codex-daily-usage-note" role="status">{t("common.shared.quota.queryFailed")}</p>}
                   </>)}
+              {!relayBalanceDisabled && (provider.newApiBalance || usageMode === "new_api") && (
+                <div className="codex-quota-section">
+                  <CodexRelayAccountBalance provider={provider} refreshKey={usageState?.updatedAt} />
+                </div>
+              )}
+            </>}
             coreMetrics={coreMetrics}
             detailMetrics={detailMetrics}
             actions={actions}

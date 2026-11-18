@@ -183,7 +183,7 @@ pub(crate) mod platform_quota_history;
 pub mod remote_config;
 pub mod secure_account_storage;
 #[path = "../../../crates/cockpit-core/src/modules/account_file_crypto.rs"]
-mod account_file_crypto;
+pub(crate) mod account_file_crypto;
 pub mod sponsor_route_sync;
 pub mod ssh_server;
 mod ssh_server_identity;

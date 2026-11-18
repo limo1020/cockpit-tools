@@ -1372,6 +1372,7 @@ pub fn run() {
             commands::codex::save_codex_account_groups,
             commands::codex::load_codex_model_providers,
             commands::codex::save_codex_model_providers,
+            commands::codex::codex_query_new_api_account_balance,
             commands::codex::codex_test_model_provider_connection,
             commands::codex::codex_model_provider_chat_test_batch,
             commands::codex::codex_cancel_model_provider_chat_test,

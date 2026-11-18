@@ -10,6 +10,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.4.2-limo-r5] - 2026-11-18
+
+This custom release is based on Cockpit Tools 1.4.2.
+
+### Added
+
+- Save independent Codex providers that share a Base URL and use different API keys.
+- Save custom account test questions and reorder questions by dragging or with the keyboard.
+- Configure a New API relay website, user ID and system access token to query the account balance. User IDs may contain letters and numbers.
+- Show relay account balances in the account overview, model provider cards and compatible bound Codex desktop instances, with manual refresh.
+
+### Fixed
+
+- Keep provider selection, credentials, account synchronization and vision settings associated with the selected provider when providers share a URL.
+- Convert Heju quota units into the USD balance and support its US, CDN, AI and website routes.
+- Distinguish API key quota from the relay account balance and clear stale balances after changing the bound provider.
+- Support question dragging in Windows WebView2 and place the independent provider action beside the saved provider heading.
+
+### Distribution
+
+- Includes the Windows x64 NSIS installer. The application version is 1.4.2 and this custom build is identified as r5 in the download filename.
+- Install this custom release from its GitHub Release assets. The application's built-in updater still uses the original author's release source.
+
 ## [1.4.2] - 2026-11-18
 
 ### Added

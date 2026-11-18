@@ -106,3 +106,32 @@
   width: 100%;
   margin-bottom: 10px;
 }
+
+.codex-saved-provider-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.codex-saved-provider-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  color: var(--primary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.codex-saved-provider-create:hover,
+.codex-saved-provider-create[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}

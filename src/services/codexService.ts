@@ -670,6 +670,7 @@ export async function addCodexAccountWithApiKey(
   apiSyncModelCatalogToCodex?: boolean,
   apiModelContextWindows?: Record<string, number>,
   apiAuthScheme?: "x-api-key" | "bearer",
+  createOnly?: boolean,
 ): Promise<CodexAccount> {
   return await invoke('add_codex_account_with_api_key', {
     apiKey,
@@ -687,6 +688,7 @@ export async function addCodexAccountWithApiKey(
     apiVisionRoutingModel: apiVisionRoutingModel ?? null,
     accountName: accountName ?? null,
     apiModelContextWindows: apiModelContextWindows ?? null,
+    createOnly: createOnly ?? null,
   });
 }
 

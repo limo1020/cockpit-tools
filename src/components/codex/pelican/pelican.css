@@ -56,6 +56,8 @@
 .pelican-setup p { margin: 0; }
 .pelican-actions, .pelican-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pelican-actions { justify-content: flex-end; }
+.pelican-saved-prompt { align-items: flex-end; }
+.pelican-saved-prompt label { flex: 1 1 220px; min-width: 0; }
 .pelican-inline { margin: 10px 0; }
 .pelican-inline > input, .pelican-inline > .single-select-dropdown { flex: 1; min-width: 160px; }
 .pelican-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; overflow-wrap: anywhere; }

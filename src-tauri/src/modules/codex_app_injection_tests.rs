@@ -1,7 +1,7 @@
 use super::{
     aggregate_api_service_balances, app_server_auth_file_snapshot, auth_diagnostic_error_signal,
     auth_diagnostic_observation, build_launch_args, cdp_auth_signal, cdp_body_preview,
-    cdp_console_auth_signal, deepseek_balance_endpoint, deepseek_balance_injection_script,
+    cdp_console_auth_signal, deepseek_balance_endpoint, account_balance_injection_script,
     deepseek_model_injection_script, has_login_route_markers, injection_badge_kind_for_model,
     injection_script, is_auth_diagnostic_url, is_codex_app_target, is_official_login_route,
     is_safe_cdp_websocket_url, normalize_injection_model_slug,
@@ -215,7 +215,8 @@ fn deepseek_balance_script_renders_balance_badge_and_details() {
         granted_balance: Some(10.0),
         topped_up_balance: Some(100.0),
     };
-    let script = deepseek_balance_injection_script("zh-cn", Some(&snapshot), false, None);
+    let snapshot = super::account_balance::AccountBalance::DeepSeek(snapshot);
+    let script = account_balance_injection_script("zh-cn", Some(&snapshot), false, None);
 
     assert!(script.contains("window.__cockpitDeepSeekBalance"));
     assert!(script.contains("data-cockpit-deepseek-balance"));
@@ -240,11 +241,27 @@ fn deepseek_balance_script_renders_balance_badge_and_details() {
 
 #[test]
 fn deepseek_balance_script_hides_badge_without_data() {
-    let script = deepseek_balance_injection_script("en", None, false, None);
+    let script = account_balance_injection_script("en", None, false, None);
 
     assert!(script.contains("const balance = null"));
     assert!(script.contains("root.hasBalance = Boolean(balance)"));
     assert!(script.contains("if (!permissions || !footer || !balance)"));
+}
+
+#[test]
+fn relay_balance_script_shows_currency_and_keeps_credentials_native() {
+    let snapshot = super::account_balance::AccountBalance::Relay(
+        crate::commands::codex::new_api_balance::NewApiAccountBalance {
+            amount: 29.03,
+            unit: Some("USD".into()),
+        },
+    );
+    let script = account_balance_injection_script("zh-cn", Some(&snapshot), true, Some("refresh-1"));
+    assert!(script.contains("const balance = {\"amount\":29.03,\"unit\":\"USD\"}"));
+    assert!(script.contains("const rawQuotaLabel = \"{amount} 额度单位\""));
+    assert!(script.contains("const refreshInProgress = true"));
+    assert!(!script.contains("accessToken"));
+    assert!(!script.contains("New-Api-User"));
 }
 
 #[test]

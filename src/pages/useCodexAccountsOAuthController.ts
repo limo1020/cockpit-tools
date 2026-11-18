@@ -25,6 +25,8 @@ import { resolveCodexProviderCapabilityProfile } from "../utils/codexProviderGat
 import { contextWindowDraftsFromRecord } from "../utils/codexModelContextWindows";
 import { resolveCodexModelProviderForApiKey } from "../utils/codexModelProviderKeyConfig";
 import { findCodexModelProviderById, findCodexModelProviderByBaseUrl, listCodexModelProviders, mergeCodexModelProviderApiKeysFromAccounts, type CodexModelProvider } from "../services/codexModelProviderService";
+import { findManagedCodexProviderForAccount } from "../utils/codexModelProviderAccountSync";
+import { CODEX_NEW_MANAGED_PROVIDER } from "./codexAccountsControllerModel";
 import { readCodexApiKeyUsageCache, type CodexApiKeyUsageState } from "../services/codexApiKeyUsageRefreshService";
 import { parseMfaCredentialInput } from "../utils/mfaVault";
 import { upsertSavedMfaRecord } from "../services/mfaRecoveryService";
@@ -648,18 +650,7 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     const resolveManagedProviderIdForAccount = useCallback(
       (account: CodexAccount | null | undefined): string | null => {
         if (!account || !isCodexApiKeyAccount(account)) return null;
-        return (
-          (
-            findCodexModelProviderById(
-              managedProviders,
-              account.api_provider_id,
-            ) ??
-            findCodexModelProviderByBaseUrl(
-              managedProviders,
-              account.api_base_url ?? "",
-            )
-          )?.id ?? null
-        );
+        return findManagedCodexProviderForAccount(managedProviders, account)?.id ?? null;
       },
       [managedProviders],
     );
@@ -832,6 +823,7 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
         setManagedProviderApiKeyId("");
         return;
       }
+      if (managedProviderId === CODEX_NEW_MANAGED_PROVIDER) return;
   
       // Prefer the explicitly selected provider when its base URL still matches;
       // otherwise auto-link by Base URL so multi-key pickers appear after preset/URL selection.

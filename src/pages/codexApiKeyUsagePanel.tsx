@@ -152,6 +152,7 @@ export function renderCodexApiKeyUsagePanel({
     );
   }
   if (variant === "card" && summary && isNewApiUsage) {
+    const label = t("codex.newApi.balance.keyQuota", "API Key quota");
     const quota = presentNewApiQuota(
       summary,
       t("codex.newApi.quota.unlimited", "不限量"),
@@ -167,13 +168,11 @@ export function renderCodexApiKeyUsagePanel({
     return (
       <div
         className="quota-item codex-api-key-quota-item new-api"
-        title={`${t("codex.cockpitApi.balance", "额度")}：${quota.text}`}
+        title={`${label}：${quota.text}`}
       >
         <div className="quota-header">
           <Database size={14} />
-          <span className="quota-label">
-            {t("codex.cockpitApi.balance", "额度")}
-          </span>
+          <span className="quota-label">{label}</span>
           <span className="quota-pct high">{quota.text}</span>
         </div>
         {quota.percent != null && (

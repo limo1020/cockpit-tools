@@ -4,14 +4,15 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { resolveCodexModelProviderForApiKey } from '../../utils/codexModelProviderKeyConfig';
-import { buildCodexModelProviderAccountSnapshot, findCodexAccountsReferencingModelProvider, resolveCodexModelProviderForAccount } from '../../utils/codexModelProviderAccountSync';
+import { buildCodexModelProviderAccountSnapshot, findCodexAccountsReferencingModelProvider, matchCodexModelProviderEndpoint, resolveCodexModelProviderForAccount } from '../../utils/codexModelProviderAccountSync';
+import { codexNewApiBalanceOrigin, defaultCodexNewApiBalanceWebsite, parseCodexNewApiBalanceInput } from '../../utils/codexNewApiBalance';
 import { contextWindowDraftsFromRecord, parseContextWindowDrafts } from '../../utils/codexModelContextWindows';
 import { buildProviderModelVisionCapabilities } from '../../utils/codexModelProviderVision';
 import { resolveCodexApiProviderPresetId, resolveOllamaLocalPlaceholderKey } from '../../utils/codexProviderPresets';
 import { isValidProviderApiKeyUrl } from '../../utils/codexProviderApiKeyUrl';
 import { resolveCodexProviderCapabilityProfile } from '../../utils/codexProviderGateway';
 import { isCodexApiKeyAccount } from '../../types/codex';
-import { isOpenAIOfficialUsageUrl } from '../../utils/openaiOfficialUsage';
+import { isOpenAIOfficialUsageUrl, resolveAccountUsageBaseUrl } from '../../utils/openaiOfficialUsage';
 import { currentCustomProviderUsageState, customProviderUsageBinding, parseCustomProviderUsage } from '../../utils/codexCustomProviderUsage';
 
 const file = ts.createSourceFile('manager.tsx', readFileSync(new URL('./CodexModelProviderManager.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -34,7 +35,7 @@ function harness() {
       { id: 'b', apiKey: 'fixture-b', name: 'B', modelCatalog: ['model-b'], supportsVision: true } ] };
   const accounts = provider.apiKeys.map((key: any) => ({ id: key.id, email: `${key.id}@example.invalid`, auth_mode: 'apikey',
     api_provider_id: provider.id, api_base_url: provider.baseUrl, openai_api_key: key.apiKey, api_sync_model_catalog_to_codex: false }));
-  const calls = { patches: [] as any[], bindings: [] as any[][], syncs: [] as any[], creates: 0, closed: 0, queries: 0, reloadMerges: [] as any[] };
+  const calls = { patches: [] as any[], bindings: [] as any[][], registrations: [] as any[][], syncs: [] as any[], creates: 0, closed: 0, queries: 0, reloadMerges: [] as any[] };
   let failSync = false, failWrite = false;
   const state: Record<string, any> = {
     useCallback: (value: any) => value, accounts, providers: [provider], currentEditingProvider: provider,
@@ -42,6 +43,7 @@ function harness() {
     contextWindowDraftsFromRecord, parseContextWindowDrafts, buildProviderModelVisionCapabilities,
     resolveCodexApiProviderPresetId, resolveOllamaLocalPlaceholderKey, isValidProviderApiKeyUrl, resolveCodexProviderCapabilityProfile,
     isOpenAIOfficialUsageUrl, parseCustomProviderUsage,
+    codexNewApiBalanceOrigin, defaultCodexNewApiBalanceWebsite, parseCodexNewApiBalanceInput, matchCodexModelProviderEndpoint, resolveAccountUsageBaseUrl,
     normalizeCodexModelProviderBaseUrl: (url: string) => url.trim().replace(/\/+$/, '').toLowerCase(),
     resolveProviderWireApi: (item: any) => item.wireApi ?? 'responses',
     resolveEnableModePreferenceForWireApi: () => 'direct',
@@ -49,10 +51,14 @@ function harness() {
     t: (key: string, args?: any) => args?.error ? `${key}: ${args.error}` : key, parseServiceError: String,
     setSaving(value: boolean) { state.saving = value; }, setShowModal(value: boolean) { state.showModal = value; },
     setFormError(value: any) { state.error = value; }, setNotice() {}, setExistingApiKeySearchQuery() {}, setEditingApiKey() {},
+    setBalanceErrorField(value: unknown) { state.balanceError = value; },
     setSelectedPresetId() {}, setSelectedSponsorTemplateId() {},
     setAccountEditor(value: any) { state.accountEditor = typeof value === 'function' ? value(state.accountEditor) : value; },
     setEditorModelKeyId(value: any) { state.editorModelKeyId = value; },
-    setForm(value: any) { state.form = typeof value === 'function' ? value(state.form) : value; },
+    setForm(value: any) {
+      state.form = typeof value === 'function' ? value(state.form) : value;
+      state.currentEditingProvider = state.providers.find((item: any) => item.id === state.form.providerId);
+    },
     setProviders(value: any) { state.providers = typeof value === 'function' ? value(state.providers) : value; state.currentEditingProvider = state.providers.find((p: any) => p.id === state.form.providerId); },
     async updateCodexModelProvider(_id: string, patch: any) {
       if (failWrite) throw new Error('disk full');
@@ -68,6 +74,7 @@ function harness() {
       calls.creates += 1; provider = { ...input, id: 'created', apiKeys: [{ id: 'created-key', apiKey: input.initialApiKey, name: input.initialApiKeyName }] };
       return provider;
     },
+    async addCodexAccountWithApiKey(...args: any[]) { calls.registrations.push(args); return { api_base_url: args[1] }; },
     async updateCodexApiKeyCredentials(...args: any[]) { if (failSync) throw new Error('account save failed'); calls.bindings.push(args); },
     async syncCodexApiKeyProviderAccounts(input: any) { calls.syncs.push(input); return 1; },
     async emitAccountsChanged() {}, async fetchAccounts() {}, async reloadProviders(merge: boolean) { calls.reloadMerges.push(merge); },
@@ -96,10 +103,33 @@ test('creating a local Ollama provider supplies a stable key without adding one 
   assert.equal(h.calls.creates, 1);
   assert.equal(h.provider().apiKeys[0].apiKey, resolveOllamaLocalPlaceholderKey(baseUrl));
   assert.equal(h.provider().wireApi, 'chat_completions');
+  assert.equal(h.calls.registrations.length, 1);
+  assert.equal(h.calls.registrations[0][15], true);
   bind('openEditModal', h.state)(h.provider());
   await h.save();
   assert.equal(h.state.error, null);
   assert.equal(h.provider().apiKeys.length, 1);
+  assert.equal(h.calls.registrations.length, 1);
+});
+
+test('balance settings accept copied Heju IDs and tokens and report the exact invalid field', async () => {
+  const h = harness();
+  h.state.form.website = 'www.hejuapi.com';
+  h.state.form.balanceUserId = '用户 ID：１２３４５';
+  h.state.form.balanceAccessToken = 'Bearer copied-system-token';
+  await h.save();
+  assert.equal(h.state.error, null);
+  assert.equal(h.calls.patches[0].website, 'https://www.hejuapi.com/');
+  assert.equal(h.calls.patches[0].newApiBalance.userId, '12345');
+  assert.equal(h.calls.patches[0].newApiBalance.accessToken, 'copied-system-token');
+
+  const invalid = harness();
+  invalid.state.form.website = 'www.hejuapi.com';
+  invalid.state.form.balanceUserId = 'invalid id with spaces';
+  invalid.state.form.balanceAccessToken = 'fixture';
+  await invalid.save();
+  assert.equal(invalid.state.balanceError, 'userId');
+  assert.equal(invalid.calls.patches.length, 0);
 });
 
 test('provider editor saves custom usage settings, rejects a different origin, and clears on blank', async () => {

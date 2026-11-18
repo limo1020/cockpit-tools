@@ -96,7 +96,7 @@ test('search filters visible labels while preserving the current value and reset
     tree = h.flush();
   };
   const shown = () => Array.from(tree.props.children[1].props.children[1].props.children,
-    (option: any) => option.props.children[0].props.children);
+    (option: any) => option.props.children.find((child: any) => child?.props.className === 'single-select-dropdown-item-label').props.children);
   filter(' CD34 ');
   assert.deepEqual(shown(), ['Work (sk-w…cd34)']);
   assert.equal(tree.props.children[0].props.children[0].props.children, 'Daily (sk-d…ab12)');

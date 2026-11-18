@@ -9,6 +9,45 @@ function nodes(tree: any): any[] {
 }
 const t = (key: string) => key;
 
+test('a named custom question is selectable after reopening setup', () => {
+  const storage = new Map<string, string>();
+  const draft = { model: 'model', prompt: '', effort: 'high', concurrency: 1 };
+  const state = { sourceMode: 'accounts', selectedAccountIds: [], starting: false, draft,
+    updateDraft: (next: Partial<typeof draft>) => Object.assign(draft, next) };
+  const setup = () => {
+    const h = loadHookModule(new URL('./PelicanSetup.tsx', import.meta.url), {
+      'react-i18next': { useTranslation: () => ({ t }) },
+      './PelicanProviderSetup': { PelicanProviderSetup: 'provider-setup' },
+      '../../../stores/useCodexPelicanStore': { useCodexPelicanStore: (select: any) => select(state) },
+      '../../../stores/useCodexAccountStore': { useCodexAccountStore: (select: any) => select({ accounts: [] }) },
+      '../../../services/codexWakeupService': { getCodexWakeupState: async () => ({ model_presets: [] }) },
+      '../../SingleSelectDropdown': { SingleSelectDropdown: 'dropdown' },
+      '../../ModalErrorMessage': { ModalErrorMessage: 'error', useModalErrorState: () => ({ clear() {}, set() {} }) },
+    }, { localStorage: { getItem: (key: string) => storage.get(key), setItem: (key: string, value: string) => storage.set(key, value) },
+      crypto: { randomUUID: () => 'fixture' } });
+    h.render(() => h.exports.PelicanSetup({ mask: (value: string) => value }));
+    return h;
+  };
+  const first = setup();
+  nodes(first.flush()).find(node => node.type === 'textarea').props.onChange({ target: { value: 'My question\nSecond line' } });
+  const nameField = nodes(first.flush()).find(node => node.props.maxLength === 64);
+  nameField.props.onChange({ target: { value: 'Regression check' } });
+  nodes(first.flush()).find(node => node.props.children === 'pelican.savedPrompts.save').props.onClick();
+  const originalDropdown = nodes(first.flush()).find(node => node.props.ariaLabel === 'pelican.benchmark');
+  originalDropdown.props.reorder.onMove('saved:fixture', 'animation');
+  first.unmount();
+
+  draft.prompt = PELICAN_BENCHMARKS.animation;
+  const reopened = setup();
+  const dropdown = nodes(reopened.flush()).find(node => node.props.ariaLabel === 'pelican.benchmark');
+  assert.equal(dropdown.props.options[0].value, 'saved:fixture');
+  const saved = dropdown.props.options.find((option: { label: string }) => option.label === 'Regression check');
+  assert.equal(saved.value, 'saved:fixture');
+  dropdown.props.onChange(saved.value);
+  assert.equal(nodes(reopened.flush()).find(node => node.type === 'textarea').props.value, 'My question\nSecond line');
+  reopened.unmount();
+});
+
 test('account setup shows and filters workspace credentials sharing one email', () => {
   const accounts = [
     { id: 'one', email: 'same@example.invalid', account_name: 'Alpha', organization_id: 'org-first' },

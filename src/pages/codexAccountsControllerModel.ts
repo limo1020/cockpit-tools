@@ -675,3 +675,5 @@ export function resolveApiProviderPresetDefaults(
     providerName: "",
   };
 }
+/** Selection in the API Key import dialog, never a persisted provider ID. */
+export const CODEX_NEW_MANAGED_PROVIDER = '__new_provider__';

@@ -216,6 +216,7 @@ pub fn upsert_api_key_account(
     account_name: Option<String>,
     api_model_context_windows: Option<HashMap<String, i64>>,
     api_auth_scheme: Option<String>,
+    create_only: bool,
 ) -> Result<CodexAccount, String> {
     let (api_key, api_base_url) = validate_api_key_credentials(&api_key, api_base_url.as_deref())?;
     let provider_config = resolve_api_provider_config(
@@ -235,6 +236,13 @@ pub fn upsert_api_key_account(
     let mut index = read_saved_account_index()?.unwrap_or(initial_index);
 
     let mut account = if let Some(mut acc) = load_account(&account_id) {
+        if create_only {
+            if !index.accounts.iter().any(|item| item.id == acc.id) {
+                index.accounts.push(account_summary_from_account(&acc));
+                save_account_index(&index)?;
+            }
+            return Ok(acc);
+        }
         let sync_model_catalog_to_codex =
             api_sync_model_catalog_to_codex.unwrap_or(acc.api_sync_model_catalog_to_codex);
         apply_api_key_fields(

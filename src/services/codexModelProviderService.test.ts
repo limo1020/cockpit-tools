@@ -121,6 +121,46 @@ test('a stale provider ID cannot copy a credential to the wrong endpoint', async
   assert.equal(result.find(item => item.baseUrl === 'https://other.example/v1')?.apiKeys[0].apiKey, 'other-endpoint-key');
 });
 
+test('providers sharing an endpoint keep separate keys and settings after reload and reconciliation', async () => {
+  const h = harness();
+  const second = await h.service.createCodexModelProvider({
+    name: 'Other relay account', baseUrl: 'https://relay.example/v1/', initialApiKey: 'sk-third',
+  });
+  await h.service.updateCodexModelProvider(second.id, {
+    baseUrl: 'https://relay.example/v1', modelCatalog: ['second-only-model'],
+  });
+  h.service.invalidateCodexModelProviderCache();
+  const providers = await h.service.mergeCodexModelProviderApiKeysFromAccounts([
+    account(), { ...account('sk-third'), id: 'second-account', api_provider_id: second.id },
+    { ...account('sk-fourth'), id: 'legacy-account', api_provider_id: undefined },
+  ]);
+  assert.equal(providers.length, 2);
+  assert.equal(h.service.findCodexModelProviderByBaseUrl(providers, second.baseUrl), null);
+  assert.equal(h.service.findCodexModelProviderByBaseUrl(providers, second.baseUrl, 'sk-third')?.id, second.id);
+  assert.deepEqual(Array.from(providers[0].apiKeys, item => item.apiKey), ['sk-first', 'sk-second']);
+  assert.deepEqual(Array.from(providers[1].apiKeys, item => item.apiKey), ['sk-third']);
+  assert.equal(providers[1].modelCatalog?.[0], 'second-only-model');
+  await assert.rejects(h.service.addApiKeyToCodexModelProvider(second.id, 'sk-first'), /API_KEY_EXISTS/);
+  await h.service.deleteCodexModelProvider(second.id);
+  const remaining = await h.service.mergeCodexModelProviderApiKeysFromAccounts([
+    { ...account('sk-third'), id: 'second-account', api_provider_id: second.id },
+  ]);
+  assert.deepEqual(Array.from(remaining[0].apiKeys, item => item.apiKey), ['sk-first', 'sk-second']);
+});
+
+test('an explicitly independent account import does not auto-link to the provider at the same URL', async () => {
+  const h = harness();
+  const input = { apiBaseUrl: 'https://relay.example/v1', apiKey: 'sk-third', providerName: 'Second', separateProvider: true };
+  const saved = await h.service.upsertCodexModelProviderFromCredential(input);
+  assert.notEqual(saved.id, 'provider');
+  h.service.invalidateCodexModelProviderCache();
+  assert.equal((await h.service.upsertCodexModelProviderFromCredential(input)).id, saved.id);
+  const providers = await h.service.listCodexModelProviders();
+  assert.equal(providers.length, 2);
+  assert.deepEqual(Array.from(providers[0].apiKeys, item => item.apiKey), ['sk-first', 'sk-second']);
+  assert.deepEqual(Array.from(providers[1].apiKeys, item => item.apiKey), ['sk-third']);
+});
+
 test('provider removal survives refresh and restart without retaining deleted secrets', async () => {
   const h = harness();
   await h.service.deleteCodexModelProvider('provider');

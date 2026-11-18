@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { CodexModelProvider } from "../services/codexModelProviderService.ts";
 import type { CodexAccount } from "../types/codex.ts";
-import { buildCodexModelProviderAccountSnapshot, findCodexAccountsReferencingModelProvider, findCodexAccountsForModelProviderDeletion } from "./codexModelProviderAccountSync.ts";
+import { buildCodexModelProviderAccountSnapshot, findCodexAccountsReferencingModelProvider, findCodexAccountsForModelProviderDeletion, findManagedCodexProviderForAccount } from "./codexModelProviderAccountSync.ts";
 
 test('official providers keep built-in account behavior and match implicit/default endpoint aliases', () => {
   const provider: CodexModelProvider = { id: 'official', name: 'OpenAI Official', baseUrl: 'https://api.openai.com/',
@@ -113,6 +113,21 @@ test('provider deletion includes unhealthy and keyless accounts without crossing
   ];
   assert.deepEqual(findCodexAccountsForModelProviderDeletion(providers, accounts), ['healthy', 'no-key', 'quota-error', 'second']);
   assert.deepEqual(findCodexAccountsForModelProviderDeletion([], accounts), []);
+});
+
+test('editing and deleting a provider affects only its own accounts at a shared URL', () => {
+  const baseUrl = 'https://relay.example.com/v1';
+  const first = { id: 'first', baseUrl, apiKeys: [{ apiKey: 'sk-first' }] };
+  const second = { id: 'second', baseUrl, apiKeys: [{ apiKey: 'sk-second' }] };
+  const providers = [first, second];
+  const accounts = [
+    account({ id: 'direct', api_provider_id: 'first', api_base_url: baseUrl, openai_api_key: 'sk-first' }),
+    account({ id: 'legacy', api_base_url: baseUrl, openai_api_key: 'sk-second' }),
+    account({ id: 'unknown', api_base_url: baseUrl, openai_api_key: '' }),
+  ];
+  assert.equal(findManagedCodexProviderForAccount(providers, accounts[1])?.id, 'second');
+  assert.deepEqual(findCodexAccountsReferencingModelProvider(first, accounts, providers), ['direct']);
+  assert.deepEqual(findCodexAccountsForModelProviderDeletion([second], accounts, providers), ['legacy']);
 });
 
 test('account snapshots resolve by credential and preserve another key and legacy defaults', () => {

@@ -15,6 +15,31 @@ import { PelicanAccountSummary } from './PelicanAccountSummary';
 import { PELICAN_BENCHMARKS, PELICAN_BENCHMARK_IDS, pelicanBenchmark, pelicanBenchmarkLabel, type PelicanBenchmark } from './pelicanBenchmarks';
 import { PelicanReference } from './PelicanReference';
 
+type SavedPrompt = { id: string; name: string; prompt: string };
+const SAVED_PROMPTS_KEY = 'agtools.codex.pelican.savedPrompts.v1';
+const PROMPT_ORDER_KEY = 'agtools.codex.pelican.promptOrder.v1';
+
+function readPromptOrder(): string[] {
+  try {
+    const order: unknown = JSON.parse(localStorage.getItem(PROMPT_ORDER_KEY) ?? '[]');
+    return Array.isArray(order) ? [...new Set(order.filter((value): value is string => typeof value === 'string'))] : [];
+  } catch {
+    return [];
+  }
+}
+
+function readSavedPrompts(): SavedPrompt[] {
+  try {
+    const items = JSON.parse(localStorage.getItem(SAVED_PROMPTS_KEY) ?? '[]') as unknown;
+    return Array.isArray(items) ? items.filter((item): item is SavedPrompt =>
+      typeof item?.id === 'string' && item.id.startsWith('saved:') &&
+      typeof item.name === 'string' && Boolean(item.name.trim()) &&
+      typeof item.prompt === 'string' && Boolean(item.prompt.trim())) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function PelicanSetup({ mask }: { mask: (value: string) => string }) {
   const { t } = useTranslation();
   const sourceMode = useCodexPelicanStore(state => state.sourceMode);
@@ -28,6 +53,12 @@ export function PelicanSetup({ mask }: { mask: (value: string) => string }) {
   const draft = useCodexPelicanStore(state => state.draft);
   const updateDraft = useCodexPelicanStore(state => state.updateDraft);
   const {model, prompt, effort} = draft;
+  const [savedPrompts, setSavedPrompts] = useState(readSavedPrompts);
+  const [promptOrder, setPromptOrder] = useState(readPromptOrder);
+  const [savedPromptId, setSavedPromptId] = useState(() => savedPrompts.find(item => item.prompt === prompt)?.id);
+  const [promptNameDraft, setPromptNameDraft] = useState<string | null>(null);
+  const savedPrompt = savedPrompts.find(item => item.id === savedPromptId);
+  const promptName = promptNameDraft ?? savedPrompt?.name ?? '';
   const setModel = (model: string) => updateDraft({model});
   const setPrompt = (prompt: string) => updateDraft({prompt});
   const setEffort = (effort: string) => updateDraft({effort});
@@ -68,6 +99,26 @@ export function PelicanSetup({ mask }: { mask: (value: string) => string }) {
   }, [error.set, t]);
 
   const fieldChanged = () => { setFieldError(null); error.clear(); };
+  const persistPrompts = (next: SavedPrompt[]) => {
+    try {
+      localStorage.setItem(SAVED_PROMPTS_KEY, JSON.stringify(next));
+      setSavedPrompts(next);
+      return true;
+    } catch {
+      error.set(t('pelican.savedPrompts.failed', 'Could not save questions locally.'));
+      return false;
+    }
+  };
+  const savePrompt = () => {
+    if (busy || !promptName.trim() || !prompt.trim()) return;
+    fieldChanged();
+    const entry = { id: savedPrompt?.id ?? `saved:${crypto.randomUUID()}`, name: promptName.trim(), prompt };
+    const next = savedPrompt ? savedPrompts.map(item => item.id === entry.id ? entry : item) : [...savedPrompts, entry];
+    if (persistPrompts(next)) {
+      setSavedPromptId(entry.id);
+      setPromptNameDraft(null);
+    }
+  };
   const failField = (field: string) => {
     setFieldError(field);
     requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>(`[data-field="${field}"]`)?.focus());
@@ -93,19 +144,62 @@ export function PelicanSetup({ mask }: { mask: (value: string) => string }) {
   if (!PELICAN_BENCHMARK_IDS.includes(currentBenchmark)) {
     benchmarkOptions.splice(benchmarkOptions.length - 1, 0, { value: currentBenchmark, label: `${pelicanBenchmarkLabel(currentBenchmark, t)} · ${t('pelican.legacyCase')}` });
   }
+  benchmarkOptions.push(...savedPrompts.map(item => ({ value: item.id, label: item.name })));
+  const positions = new Map(promptOrder.map((id, index) => [id, index]));
+  benchmarkOptions.sort((a, b) => (positions.get(a.value) ?? promptOrder.length) - (positions.get(b.value) ?? promptOrder.length));
+  const moveQuestion = (from: string, to: string) => {
+    const next = benchmarkOptions.map(option => option.value);
+    const fromIndex = next.indexOf(from);
+    const toIndex = next.indexOf(to);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+    next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, from);
+    fieldChanged();
+    try {
+      localStorage.setItem(PROMPT_ORDER_KEY, JSON.stringify(next));
+      setPromptOrder(next);
+    } catch {
+      error.set(t('pelican.savedPrompts.orderFailed', 'Could not save the question order.'));
+    }
+  };
 
   return <form className="pelican-setup" ref={formRef} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
     <p className="pelican-muted">{t(providerMode ? 'pelican.providerDescription' : 'pelican.description')}</p>
     <p className="pelican-muted">{t('pelican.scoringHint')}</p>
     <label>{t('pelican.benchmark')}
-      <SingleSelectDropdown value={currentBenchmark} ariaLabel={t('pelican.benchmark')} disabled={busy}
+      <SingleSelectDropdown value={savedPrompt?.id ?? currentBenchmark} ariaLabel={t('pelican.benchmark')} disabled={busy}
         options={benchmarkOptions}
-        onChange={(value) => { setPrompt(PELICAN_BENCHMARKS[value as PelicanBenchmark]); fieldChanged(); }} />
+        reorder={{ onMove: moveQuestion, handleLabel: t('pelican.savedPrompts.reorder', 'Drag to reorder. With a question focused, use Alt + ↑ or Alt + ↓.') }}
+        onChange={(value) => {
+          const entry = savedPrompts.find(item => item.id === value);
+          setSavedPromptId(entry?.id);
+          setPromptNameDraft(null);
+          setPrompt(entry?.prompt ?? PELICAN_BENCHMARKS[value as PelicanBenchmark]);
+          fieldChanged();
+        }} />
     </label>
     <label>{t('pelican.prompt')}
       <textarea data-field="prompt" value={prompt} rows={4} maxLength={100000} disabled={busy} aria-invalid={fieldError === 'prompt'} onChange={(event) => { setPrompt(event.target.value); fieldChanged(); }} />
     </label>
     {fieldError === 'prompt' && <span className="pelican-field-error" role="alert">{t('pelican.required')}</span>}
+    {(savedPrompt || currentBenchmark === 'custom') && <div className="pelican-inline pelican-saved-prompt">
+      <label>{t('pelican.savedPrompts.name', 'Question name')}
+        <input value={promptName} maxLength={64} disabled={busy}
+          onChange={event => { setPromptNameDraft(event.target.value); fieldChanged(); }}
+          onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); savePrompt(); } }} />
+      </label>
+      <button type="button" className="btn btn-secondary" onClick={savePrompt}
+        disabled={busy || !promptName.trim() || !prompt.trim() || (savedPrompt?.name === promptName.trim() && savedPrompt.prompt === prompt)}>
+        {t('pelican.savedPrompts.save', 'Save question')}
+      </button>
+      {savedPrompt && <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => {
+        fieldChanged();
+        if (persistPrompts(savedPrompts.filter(item => item.id !== savedPrompt.id))) {
+          setSavedPromptId(undefined);
+          setPromptNameDraft(null);
+        }
+      }}>{t('pelican.savedPrompts.remove', 'Remove saved question')}</button>}
+    </div>}
     <PelicanReference prompt={prompt} />
     <div className="pelican-fields">
       {!providerMode && <label>{t('pelican.model')}

@@ -1101,7 +1101,7 @@ async function exportConfigBundle(registry: AccountRegistry): Promise<DataTransf
     account_groups: exportAccountGroups(accountGroups, registry),
     codex_account_groups: exportCodexAccountGroups(codexAccountGroups, registry),
     platform_account_groups: platformAccountGroups,
-    codex_model_providers: codexModelProviders,
+    codex_model_providers: codexModelProviders.map(provider => ({ ...provider, newApiBalance: undefined })),
     instance_stores: Object.fromEntries(instanceStoreEntries) as Partial<
       Record<InstancePlatform, ExportedInstanceStore>
     >,

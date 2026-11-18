@@ -1,4 +1,4 @@
-import { resolveAccountUsageBaseUrl } from "../../utils/openaiOfficialUsage";
+import { findManagedCodexProviderForAccount } from "../../utils/codexModelProviderAccountSync";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -198,8 +198,7 @@ test('editing only a provider key retains each linked account mode and its model
   const context: Record<string, any> = {
     useCallback: (fn: unknown) => fn, saving: false, providers: [provider], accounts: [account],
     editingApiKey: { providerId: 'provider', apiKeyId: 'key', apiKey: 'new-key', originalApiKey: 'old-key' },
-    isCodexApiKeyAccount, resolveCodexApiProviderPresetId, CODEX_API_PROVIDER_CUSTOM_ID, resolveAccountUsageBaseUrl,
-    normalizeCodexModelProviderBaseUrl: (url: string) => url.replace(/\/+$/, '').toLowerCase(),
+    isCodexApiKeyAccount, resolveCodexApiProviderPresetId, CODEX_API_PROVIDER_CUSTOM_ID, findManagedCodexProviderForAccount,
     resolveProviderWireApi: () => 'responses',
     updateApiKeyOnCodexModelProvider: async () => provider,
     updateCodexApiKeyCredentials: async (...args: unknown[]) => { updates.push(args); },

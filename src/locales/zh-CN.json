@@ -102,6 +102,14 @@
       "custom": "自定义"
     },
     "benchmark": "测试题目",
+    "savedPrompts": {
+      "name": "题目名称",
+      "save": "保存题目",
+      "remove": "移除已保存题目",
+      "failed": "无法保存本地题目",
+      "reorder": "拖动排序。选中题目后也可按 Alt + ↑ 或 Alt + ↓ 移动。",
+      "orderFailed": "无法保存题目顺序"
+    },
     "results": "测试结果",
     "usageTokens": "{{tokens}} Token",
     "quotaUsed": "5h 消耗 {{percent}}%",
@@ -1590,8 +1598,8 @@
       "codexPathReset": "重置默认",
       "codexSyncWsl": "同步 Codex 到 WSL",
       "codexSyncWslDesc": "切换默认 Codex 账号后，同时把 auth.json 和 config.toml 写入 WSL 的 Codex 配置目录。",
-      "codexAppUiInjection": "显示 API 服务额度",
-      "codexAppUiInjectionDesc": "绑定 API 服务的 Codex 底栏显示所选模型的额度（GPT 5h／周配额、DeepSeek 余额或 Grok 额度）及当前会话的输出速度、缓存命中率。点击可查看额度、会话指标和 API 服务统计，切换当前会话／全部服务的请求记录，查看更多或刷新。会话关联不明或有效计时不足时，对应指标显示 —。需保持 Cockpit Tools 在后台运行；额度更新需要网络。",
+      "codexAppUiInjection": "显示 API 服务额度和账户余额",
+      "codexAppUiInjectionDesc": "绑定 API 服务的 Codex 底栏显示所选模型的额度（GPT 5h／周配额、DeepSeek 余额或 Grok 额度）及当前会话的输出速度、缓存命中率。绑定供应商账号时显示 DeepSeek 官方余额，或供应商设置中已配置的中转站账户余额。点击可查看详情或刷新。API 服务详情支持切换当前会话／全部服务的请求记录，查看更多或刷新。会话关联不明或有效计时不足时，对应指标显示 —。需保持 Cockpit Tools 在后台运行；额度更新需要网络。",
       "codexAppUiInjectionPoolLabel": "账号",
       "codexAppUiInjectionWeeklyLabel": "周",
       "codexAppUiInjectionFiveHourLabel": "5h",
@@ -3183,6 +3191,22 @@
       }
     },
     "newApi": {
+      "balance": {
+        "settings": "中转站账户余额（New API）",
+        "hint": "在上方填写中转站官网。在官网的个人设置中查看用户 ID 并生成系统访问令牌。",
+        "userId": "用户 ID",
+        "accessToken": "系统访问令牌",
+        "invalidWebsite": "请输入中转站的 HTTPS 官网地址。",
+        "invalidUserId": "请从中转站个人设置复制完整的用户 ID，支持字母和数字。",
+        "invalidAccessToken": "请粘贴官网安全设置里的系统访问令牌。",
+        "authFailed": "请检查供应商设置中的用户 ID 和系统访问令牌。",
+        "failed": "查询余额失败，请刷新重试。",
+        "refresh": "刷新中转站账户余额",
+        "notConfigured": "未配置",
+        "unavailable": "查询失败",
+        "rawQuota": "{{amount}} 额度单位",
+        "keyQuota": "API Key 额度"
+      },
       "quota": {
         "available": "额度",
         "unlimited": "不限量",
@@ -4210,7 +4234,8 @@
         "supportsWebsockets": "WebSocket 传输"
       },
       "validation": {
-        "apiKeyExists": "该 API 密钥已存在于当前供应商",
+        "apiKeyExists": "该地址下已保存这把 API Key，请使用另一把 Key。",
+        "apiKeyUsedElsewhere": "这把 API Key 已用于其他 Base URL 的账号。",
         "apiKeyRequired": "请输入 API 密钥",
         "nameRequired": "供应商名称不能为空",
         "baseUrlInvalid": "Base URL 格式无效",
@@ -4221,6 +4246,7 @@
         "apiKeyUrlInvalid": "请填写不含内嵌凭据的 HTTP(S) 管理页面网址；API Key 请填入密钥栏。"
       },
       "saveSuccess": "模型供应商已保存",
+      "savedWithAccount": "供应商和 API Key 账号已保存，可在账号总览查看。",
       "confirmDeleteWithAccounts": "确认删除供应商「{{name}}」及其关联的 {{count}} 个账号吗？",
       "confirmDelete": "确认删除供应商「{{name}}」吗？",
       "deleteFailed": "删除供应商失败：{{error}}",
@@ -4252,6 +4278,7 @@
       "searchSavedProviders": "搜索供应商",
       "noMatchingSavedProviders": "没有匹配的供应商",
       "selectSavedProvider": "已保存供应商",
+      "addIndependent": "新建供应商",
       "selectSavedApiKey": "已保存 API Key",
       "selectSavedApiKeyPlaceholder": "选择 API Key",
       "selectSavedApiKeyHint": "该供应商有多个 API Key，可在此切换选择。",

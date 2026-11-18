@@ -852,6 +852,17 @@ html[data-reduced-motion="true"] .codex-accounts-grid .codex-account-card[data-c
   font-size: 13px;
 }
 
+.codex-relay-account-balance .quota-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.codex-relay-account-balance .quota-label { flex: 1; }
+.codex-relay-account-balance .quota-pct { overflow-wrap: anywhere; }
+.codex-relay-account-balance .quota-reset { white-space: normal; }
+
 .codex-quota-section .quota-pct.high {
   color: var(--success);
 }

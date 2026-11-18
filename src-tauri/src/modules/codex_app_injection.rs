@@ -2,7 +2,7 @@
 //!
 //! 以下注入共用同一套 loopback CDP 通道：
 //! - API 服务绑定：底栏自适应胶囊中的额度、会话输出速度与缓存命中率；
-//! - DeepSeek 账号绑定（网关列出 / CDP 注入 / 直连官方）：该账号的余额。
+//! - 供应商账号绑定：DeepSeek 官方余额或已配置的中转站账户余额。
 //! - API 服务及混合模型路由：前端语音创建请求转入实例网关。
 //!
 //! 该模块只连接实例自己的 loopback CDP 端口，不修改官方 app.asar，
@@ -49,6 +49,9 @@ mod live;
 #[path = "codex_app_injection_binding.rs"]
 mod binding;
 
+#[path = "codex_app_injection_balance.rs"]
+mod account_balance;
+
 #[path = "codex_app_injection_resume.rs"]
 mod resume;
 pub(crate) use resume::schedule_desktop_resume;
@@ -94,11 +97,11 @@ use toml_edit::Document;
 const CDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const INJECTION_INTERVAL: Duration = Duration::from_secs(2);
 const QUOTA_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
-/// DeepSeek 余额变化很慢，保持较长的刷新间隔，避免无谓的上游请求。
-const DEEPSEEK_BALANCE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+/// 账户余额保持较长的刷新间隔，点击徽标旁的按钮可立即刷新。
+const ACCOUNT_BALANCE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const DEEPSEEK_BALANCE_QUERY_TIMEOUT: Duration = Duration::from_secs(8);
 /// 绑定账号有变更（模型列表、接入方式等）时最多延迟这么久生效，避免每 2 秒读取账号文件。
-const DEEPSEEK_ACCOUNT_CACHE_TTL: Duration = Duration::from_secs(15);
+const PROVIDER_ACCOUNT_CACHE_TTL: Duration = Duration::from_secs(15);
 /// 页面读不到当前模型时，用实例 config.toml 兜底刷新的最小间隔，避免每轮都读文件。
 const MODEL_RESYNC_INTERVAL: Duration = Duration::from_secs(10);
 /// 新文档脚本按「脚本种类 | CDP target」记录，同一实例可同时运行多套注入。
@@ -265,17 +268,7 @@ fn bound_api_key_account(bind_account_id: Option<&str>) -> Option<CodexAccount> 
     account.is_api_key_auth().then_some(account)
 }
 
-/// 绑定账号（含 `__provider_gateway__:` 前缀）对应的 DeepSeek 账号。
-///
-/// DeepSeek 的余额注入与接入方式无关：网关列出、CDP 注入、直连官方都要显示，
-/// 因此这里只解析绑定账号本身，不看 `api_instance_access_mode`。
-fn deepseek_bound_account(bind_account_id: Option<&str>) -> Option<CodexAccount> {
-    let account_id = bind_account_id_value(bind_account_id)?;
-    let account = crate::modules::codex_account::load_account(&account_id)?;
-    crate::modules::codex_account::is_deepseek_account(&account).then_some(account)
-}
-
-/// DeepSeek 余额接口地址；非官方 host（第三方中转）返回 `None`，此时不注入余额。
+/// DeepSeek 官方余额接口地址，中转站使用其单独配置的账户余额接口。
 fn deepseek_balance_endpoint(account: &CodexAccount) -> Option<String> {
     let base_url = account
         .api_base_url
@@ -287,9 +280,9 @@ fn deepseek_balance_endpoint(account: &CodexAccount) -> Option<String> {
         .flatten()
 }
 
-fn bind_uses_deepseek_balance_injection(bind_account_id: Option<&str>) -> bool {
-    deepseek_bound_account(bind_account_id)
-        .is_some_and(|account| deepseek_balance_endpoint(&account).is_some())
+fn bind_uses_account_balance_injection(bind_account_id: Option<&str>) -> bool {
+    bound_api_key_account(bind_account_id)
+        .is_some_and(|account| account_balance::BalanceSource::for_account(&account).is_some())
 }
 
 pub fn should_enable_injection(bind_account_id: Option<&str>) -> bool {
@@ -297,7 +290,7 @@ pub fn should_enable_injection(bind_account_id: Option<&str>) -> bool {
         || (enabled_for_app() && bound_api_key_account(bind_account_id)
             .is_some_and(|account| crate::modules::codex_remote_service::for_routing_account(&account).is_some()))
         || bind_uses_cdp_model_injection(bind_account_id)
-        || (enabled_for_app() && bind_uses_deepseek_balance_injection(bind_account_id))
+        || (enabled_for_app() && bind_uses_account_balance_injection(bind_account_id))
 }
 
 /// API 服务订阅提示、可选增强、认证观察、额度与模型适配共用实例的 loopback CDP。
@@ -1650,13 +1643,12 @@ include!("codex_app_injection_statusline.rs");
 include!("codex_app_injection_usage_poll.rs");
 include!("codex_app_injection_dialog_poll.rs");
 
-/// DeepSeek 账号余额徽标：与 API 服务额度徽标同位置、同交互，但只展示账号余额。
+/// 供应商账户余额徽标，与 API 服务额度徽标共用布局。
 ///
-/// 独立的 `window.__cockpitDeepSeekBalance` 命名空间与 `data-cockpit-deepseek-balance*`
-/// 标记，避免与 CDP 模式下的模型列表注入脚本互相覆盖渲染函数。
-fn deepseek_balance_injection_script(
+/// 沿用 DeepSeek 徽标的 DOM 标记和命名空间，使切换供应商时能清理旧徽标。
+fn account_balance_injection_script(
     locale: &str,
-    balance: Option<&DeepSeekBalanceSnapshot>,
+    balance: Option<&account_balance::AccountBalance>,
     refresh_in_progress: bool,
     handled_refresh_token: Option<&str>,
 ) -> String {
@@ -1708,6 +1700,9 @@ fn deepseek_balance_injection_script(
             .unwrap_or_else(|_| "\"Refresh quota\"".to_string());
     let close_label = serde_json::to_string(&i18n::translate(locale, "common.close", &[]))
         .unwrap_or_else(|_| "\"Close\"".to_string());
+    let raw_quota_label = serde_json::to_string(&i18n::translate(
+        locale, "codex.newApi.balance.rawQuota", &[("amount", "{amount}")],
+    )).unwrap_or_else(|_| "\"{amount} quota units\"".to_string());
     let refresh_in_progress = if refresh_in_progress { "true" } else { "false" };
     let handled_refresh_token =
         serde_json::to_string(&handled_refresh_token).unwrap_or_else(|_| "null".to_string());
@@ -1725,6 +1720,7 @@ fn deepseek_balance_injection_script(
       const unavailableLabel = {unavailable_label};
       const refreshLabel = {refresh_label};
       const closeLabel = {close_label};
+      const rawQuotaLabel = {raw_quota_label};
       const refreshInProgress = {refresh_in_progress};
       const handledRefreshToken = {handled_refresh_token};
       const hostHeartbeatTimeoutMs = 8000;
@@ -1814,8 +1810,11 @@ fn deepseek_balance_injection_script(
         const permissionsRect = permissions.getBoundingClientRect();
         host.style.cssText = 'position:fixed;transform:translate(-50%,-50%);z-index:2;display:flex;align-items:center;justify-content:center;gap:6px;width:max-content;color:var(--color-token-text-secondary,#737373);font-size:12px;line-height:1;white-space:nowrap;pointer-events:none;';
         const badgeStyle = 'display:inline-flex;align-items:center;gap:6px;height:24px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.20));border-radius:999px;padding:0 9px;background:var(--color-token-main-surface-primary,rgba(127,127,127,.10));color:inherit;font:inherit;box-shadow:0 1px 2px rgba(0,0,0,.08);backdrop-filter:blur(8px);font-weight:500;cursor:pointer;pointer-events:auto;';
-        const currency = balance.currency || null;
-        const totalText = formatMoney(balance.totalBalance, currency);
+        const isRelay = Object.prototype.hasOwnProperty.call(balance, 'amount');
+        const currency = (isRelay ? balance.unit : balance.currency) || null;
+        const totalText = isRelay && !currency
+          ? rawQuotaLabel.replace('{{amount}}', Number(balance.amount).toLocaleString(undefined, {{maximumFractionDigits:2}}))
+          : formatMoney(isRelay ? balance.amount : balance.totalBalance, currency);
         const badgeHtml = '<button type="button" data-cockpit-deepseek-balance-open style="' + badgeStyle + '"><span style="width:6px;height:6px;border-radius:999px;background:#3b82f6"></span>' + escapeHtml(balanceLabel) + ' ' + escapeHtml(totalText) + '</button>'
           + '<button type="button" data-cockpit-deepseek-balance-refresh title="' + escapeHtml(refreshLabel) + '" aria-label="' + escapeHtml(refreshLabel) + '" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.20));border-radius:999px;padding:0;background:var(--color-token-main-surface-primary,rgba(127,127,127,.10));color:inherit;box-shadow:0 1px 2px rgba(0,0,0,.08);backdrop-filter:blur(8px);cursor:pointer;pointer-events:auto;"><svg data-cockpit-deepseek-balance-refresh-icon viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"></path><path d="M4 18v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.6-2.6L20 11"></path><path d="M4 13l2.3 4.6A7 7 0 0 0 17.9 15"></path></svg></button>';
         if (host.innerHTML !== badgeHtml) host.innerHTML = badgeHtml;
@@ -1832,10 +1831,10 @@ fn deepseek_balance_injection_script(
           const detailsHtml = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 4px;padding-bottom:6px;border-bottom:1px solid var(--color-token-border-subtle,rgba(127,127,127,.10));"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--color-token-text-secondary,#737373);"><i style="width:6px;height:6px;border-radius:999px;background:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.12);"></i>' + escapeHtml(accountBalanceLabel) + '</span><button type="button" data-cockpit-deepseek-balance-close aria-label="' + escapeHtml(closeLabel) + '" title="' + escapeHtml(closeLabel) + '" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:0;border-radius:4px;background:transparent;color:var(--color-token-text-secondary,#737373);font:inherit;font-size:14px;line-height:1;cursor:pointer;padding:0;opacity:.72;">×</button></div>'
             + '<div>'
             + row(totalBalanceLabel, totalText)
-            + row(grantedBalanceLabel, formatMoney(balance.grantedBalance, currency))
-            + row(toppedUpBalanceLabel, formatMoney(balance.toppedUpBalance, currency))
+            + (isRelay ? '' : row(grantedBalanceLabel, formatMoney(balance.grantedBalance, currency)))
+            + (isRelay ? '' : row(toppedUpBalanceLabel, formatMoney(balance.toppedUpBalance, currency)))
             + '</div>'
-            + '<div style="display:flex;justify-content:space-between;gap:10px;padding-top:7px;font-size:11px;opacity:.78;"><span>' + escapeHtml(balance.isAvailable ? availableLabel : unavailableLabel) + '</span><span>' + escapeHtml(currency || '') + '</span></div>';
+            + (isRelay ? '' : '<div style="display:flex;justify-content:space-between;gap:10px;padding-top:7px;font-size:11px;opacity:.78;"><span>' + escapeHtml(balance.isAvailable ? availableLabel : unavailableLabel) + '</span><span>' + escapeHtml(currency || '') + '</span></div>');
           if (details.innerHTML !== detailsHtml) details.innerHTML = detailsHtml;
         }}
         const openButton = host.querySelector('[data-cockpit-deepseek-balance-open]');
@@ -3268,16 +3267,16 @@ async fn run_injection_loop(
         .build()
         .unwrap_or_else(|_| Client::new());
     let mut last_quota_at = Instant::now() - QUOTA_REFRESH_INTERVAL;
-    let mut last_balance_at = Instant::now() - DEEPSEEK_BALANCE_REFRESH_INTERVAL;
-    let mut last_api_service_balance_at = Instant::now() - DEEPSEEK_BALANCE_REFRESH_INTERVAL;
+    let mut last_api_service_balance_at = Instant::now() - ACCOUNT_BALANCE_REFRESH_INTERVAL;
     let mut quota = QuotaResponse::default();
-    let mut balance: Option<DeepSeekBalanceSnapshot> = None;
+    let mut account_balance_poller = account_balance::BalancePoller::default();
     let mut api_service_balance_lines: Vec<InjectionBalanceLine> = Vec::new();
     let mut api_service_grok_lines: Vec<InjectionGrokQuotaLine> = Vec::new();
     let mut handled_refresh_token: Option<String> = None;
     let mut handled_balance_token: Option<String> = None;
-    let mut deepseek_account_cache: Option<CodexAccount> = None;
-    let mut deepseek_account_at = Instant::now() - DEEPSEEK_ACCOUNT_CACHE_TTL;
+    let mut provider_account_cache: Option<CodexAccount> = None;
+    let mut provider_account_at = Instant::now() - PROVIDER_ACCOUNT_CACHE_TTL;
+    let mut account_balance_source = None;
     let mut observed_model = read_profile_selected_model(&profile_dir);
     let mut last_model_resync_at = Instant::now() - MODEL_RESYNC_INTERVAL;
     let mut refresh_tasks = JoinSet::new();
@@ -3408,29 +3407,23 @@ async fn run_injection_loop(
             logger::log_warn("[Codex App Injection] 刷新快照等待超时，保留缓存和后台单飞任务");
         }
         let locale = config::get_user_config().language;
-        // DeepSeek 绑定（网关列出 / CDP 注入 / 直连官方）统一在底部显示账号余额；
-        // 只有 CDP 接入方式才需要额外的模型列表注入；官方 DeepSeek 仍额外注入余额。
-        if deepseek_account_at.elapsed() >= DEEPSEEK_ACCOUNT_CACHE_TTL {
-            deepseek_account_at = Instant::now();
+        // 余额来源随绑定账号和供应商配置更新，CDP 模型列表仍使用账号本身的接入方式。
+        if provider_account_at.elapsed() >= PROVIDER_ACCOUNT_CACHE_TTL {
+            provider_account_at = Instant::now();
             // 账号文件短暂读取失败时保留上一份快照，不因为一次读取失败就撤掉余额。
             if let Some(account) = bound_api_key_account(bind_account_id.as_deref()) {
-                deepseek_account_cache = Some(account);
+                account_balance_source = account_balance::BalanceSource::for_account(&account);
+                provider_account_cache = Some(account);
             }
         }
-        // 只有「CDP 模型注入」或「可查官方余额」时才需要进入注入分支：
-        // 第三方中转没有官方余额接口，只做模型清单注入。
-        let remote_account = deepseek_account_cache.as_ref().filter(|account| crate::modules::codex_remote_service::for_routing_account(account).is_some());
-        let deepseek_account = deepseek_account_cache.as_ref().filter(|account| {
-            crate::modules::codex_account::account_uses_cdp_model_injection(account)
-                || deepseek_balance_endpoint(account).is_some()
-        });
-        if let Some(deepseek_account) = deepseek_account {
-            let deepseek_cdp =
-                crate::modules::codex_account::account_uses_cdp_model_injection(deepseek_account);
-            if deepseek_cdp {
-                let account_id = Some(deepseek_account.id.clone());
+        let remote_account = provider_account_cache.as_ref().filter(|account| crate::modules::codex_remote_service::for_routing_account(account).is_some());
+        if let Some(provider_account) = provider_account_cache.as_ref() {
+            let provider_cdp =
+                crate::modules::codex_account::account_uses_cdp_model_injection(provider_account);
+            if provider_cdp {
+                let account_id = Some(provider_account.id.clone());
                 let payload = crate::modules::codex_account::provider_injection_model_payload(
-                    deepseek_account,
+                    provider_account,
                 );
                 let script = deepseek_model_injection_script(
                     &locale,
@@ -3481,19 +3474,16 @@ async fn run_injection_loop(
                     }
                 }
             }
-            if enabled_for_app() && remote_account.is_none() {
-                if last_balance_at.elapsed() >= DEEPSEEK_BALANCE_REFRESH_INTERVAL {
-                    if let Some(value) =
-                        fetch_deepseek_balance(&balance_client, deepseek_account).await
-                    {
-                        balance = Some(value);
-                    }
-                    last_balance_at = Instant::now();
-                }
-                let script = deepseek_balance_injection_script(
+            if remote_account.is_none() {
+                let source = account_balance_source.clone().filter(|source| {
+                    enabled_for_app() && (!matches!(source, account_balance::BalanceSource::Relay { .. })
+                        || !codex_quota::relay_balance_disabled())
+                });
+                account_balance_poller.collect(source, &balance_client);
+                let script = account_balance_injection_script(
                     &locale,
-                    balance.as_ref(),
-                    false,
+                    account_balance_poller.balance.as_ref(),
+                    account_balance_poller.refreshing,
                     handled_balance_token.as_deref(),
                 );
                 let targets = query_targets(&client, port).await;
@@ -3511,17 +3501,11 @@ async fn run_injection_loop(
                 }
                 if let Some(token) = pending_refresh_token {
                     handled_balance_token = Some(token);
-                    if let Some(value) =
-                        fetch_deepseek_balance(&balance_client, deepseek_account).await
-                    {
-                        balance = Some(value);
-                    }
-                    last_balance_at = Instant::now();
-                    // 立刻重绘一次，让刷新按钮结束 loading 状态。
-                    let refreshed_script = deepseek_balance_injection_script(
+                    account_balance_poller.refresh();
+                    let refreshed_script = account_balance_injection_script(
                         &locale,
-                        balance.as_ref(),
-                        false,
+                        account_balance_poller.balance.as_ref(),
+                        account_balance_poller.refreshing,
                         handled_balance_token.as_deref(),
                     );
                     for target in &targets {
@@ -3584,7 +3568,7 @@ async fn run_injection_loop(
         }
         // Slow balance requests must never delay the usage status line or its heartbeat.
         if remote_account.is_none() && (balance_fetch_due
-            || last_api_service_balance_at.elapsed() >= DEEPSEEK_BALANCE_REFRESH_INTERVAL
+            || last_api_service_balance_at.elapsed() >= ACCOUNT_BALANCE_REFRESH_INTERVAL
         ) {
             if balance_fetch_tasks.is_empty() {
                 let client = balance_client.clone();
